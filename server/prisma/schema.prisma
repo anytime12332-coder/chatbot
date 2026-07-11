@@ -44,6 +44,13 @@ model Chatbot {
   leadStorageOption     String  @default("both") // "inbox", "separate", or "both"
   leads                 Lead[]
 
+  // RAG configurations
+  ragEnabled  Boolean @default(false)
+  ragProvider String  @default("openai") // "openai", "gemini", "custom"
+  ragApiKey   String  @default("") @db.Text
+  ragModel    String  @default("text-embedding-3-small")
+  ragChunks   DocumentChunk[]
+
   @@index([adminId])
 }
 
@@ -113,6 +120,18 @@ model Lead {
 
   chatbot        Chatbot       @relation(fields: [chatbotId], references: [id], onDelete: Cascade)
   conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([chatbotId])
+}
+
+model DocumentChunk {
+  id         String   @id @default(uuid())
+  chatbotId  String
+  content    String   @db.Text
+  embedding  String   @db.Text // JSON stringified float array
+  createdAt  DateTime @default(now())
+
+  chatbot    Chatbot  @relation(fields: [chatbotId], references: [id], onDelete: Cascade)
 
   @@index([chatbotId])
 }

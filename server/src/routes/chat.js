@@ -64,8 +64,26 @@ async function prepareChat(message, sessionId, chatbotId, pageUrl, ip) {
   });
 
   // Build AI messages
+  let systemPromptText = '';
+  if (chatbot.ragEnabled) {
+    const { retrieveRelevantContext } = require('../lib/rag');
+    const retrievedContext = await retrieveRelevantContext(message.trim(), chatbot);
+    
+    const parts = [];
+    if (chatbot.systemPrompt) parts.push(chatbot.systemPrompt);
+    if (chatbot.businessName) parts.push(`Business Name: ${chatbot.businessName}`);
+    if (retrievedContext) {
+      parts.push(`Relevant Business Context (use this to answer user questions):\n${retrievedContext}`);
+    } else if (chatbot.businessInfo) {
+      parts.push(`Business Information: ${chatbot.businessInfo}`);
+    }
+    systemPromptText = parts.join('\n\n');
+  } else {
+    systemPromptText = buildSystemPrompt(chatbot);
+  }
+
   const aiMessages = [
-    { role: 'system', content: buildSystemPrompt(chatbot) },
+    { role: 'system', content: systemPromptText },
     ...history.map(m => ({ role: m.role, content: m.content })),
     { role: 'user', content: message.trim() },
   ];

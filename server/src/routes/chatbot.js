@@ -120,7 +120,8 @@ router.put('/:id', async (req, res) => {
 
     const {
       name, businessName, businessInfo, systemPrompt, welcomeMessage, primaryColor, position, isActive,
-      leadCollectionEnabled, leadTriggerPrompt, leadQuestions, webhookUrl, leadStorageOption
+      leadCollectionEnabled, leadTriggerPrompt, leadQuestions, webhookUrl, leadStorageOption,
+      ragEnabled, ragProvider, ragApiKey, ragModel
     } = req.body;
 
     const chatbot = await prisma.chatbot.update({
@@ -139,9 +140,42 @@ router.put('/:id', async (req, res) => {
         ...(leadQuestions !== undefined && { leadQuestions }),
         ...(webhookUrl !== undefined && { webhookUrl }),
         ...(leadStorageOption !== undefined && { leadStorageOption }),
+        ...(ragEnabled !== undefined && { ragEnabled }),
+        ...(ragProvider !== undefined && { ragProvider }),
+        ...(ragApiKey !== undefined && { ragApiKey: ragApiKey.includes('****') ? existing.ragApiKey : encrypt(ragApiKey) }),
+        ...(ragModel !== undefined && { ragModel }),
       },
       include: { apiConfig: true },
     });
+
+    // Auto rebuild RAG chunks if businessInfo changed and RAG is enabled
+    if (businessInfo !== undefined && businessInfo !== existing.businessInfo && chatbot.ragEnabled) {
+      const { splitTextIntoChunks, generateEmbedding } = require('../lib/rag');
+      const decryptedKey = chatbot.ragApiKey ? decrypt(chatbot.ragApiKey) : null;
+      const chunks = splitTextIntoChunks(businessInfo);
+      
+      if (chunks.length > 0) {
+        await prisma.documentChunk.deleteMany({ where: { chatbotId: chatbot.id } });
+        for (const chunk of chunks) {
+          let embeddingStr = '[]';
+          if (decryptedKey) {
+            try {
+              const embeddingVector = await generateEmbedding(chunk, chatbot.ragProvider, decryptedKey, chatbot.ragModel);
+              embeddingStr = JSON.stringify(embeddingVector);
+            } catch (e) {
+              console.warn(`Auto-embedding generation failed in chatbot update: ${e.message}`);
+            }
+          }
+          await prisma.documentChunk.create({
+            data: {
+              chatbotId: chatbot.id,
+              content: chunk,
+              embedding: embeddingStr
+            }
+          });
+        }
+      }
+    }
 
     if (chatbot.apiConfig?.apiKey) {
       chatbot.apiConfig.apiKey = maskApiKey(decrypt(chatbot.apiConfig.apiKey));
