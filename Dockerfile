@@ -37,7 +37,7 @@ COPY --from=frontend-build /app/client/dist /app/client/dist
 RUN printf '#!/bin/sh\n\
 cd /app/server\n\
 echo "=== Step 1: Database migration ==="\n\
-npx prisma migrate deploy 2>&1 || (echo "migrate failed, trying db push..." && npx prisma db push --accept-data-loss 2>&1) || echo "WARNING: DB sync failed"\n\
+npx prisma db push --accept-data-loss 2>&1 || echo "WARNING: DB sync failed"\n\
 echo "=== Step 2: Seed database ==="\n\
 node src/seed.js 2>&1 || echo "WARNING: Seed failed"\n\
 echo "=== Step 3: Start server ==="\n\
