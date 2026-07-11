@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Database, Save, Sparkles, RefreshCw, Key, ShieldAlert, Check, HelpCircle, Code, HelpCircle as Info } from 'lucide-react';
+import { Database, Save, Sparkles, RefreshCw, Key, ShieldAlert, Check, HelpCircle, FileText, Upload, Copy, Edit, FileCode } from 'lucide-react';
 import api from '../lib/api';
 import { useBots } from '../context/BotContext';
 
@@ -13,6 +13,7 @@ export default function RagSettings() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
+  const [parsingFile, setParsingFile] = useState(false);
   const [message, setMessage] = useState('');
   
   const [config, setConfig] = useState({
@@ -27,6 +28,10 @@ export default function RagSettings() {
   const [chunkCount, setChunkCount] = useState(0);
   const [sampleChunks, setSampleChunks] = useState([]);
   const [testResult, setTestResult] = useState(null);
+
+  // Tab state for knowledge source input
+  const [inputTab, setInputTab] = useState('text'); // 'text' or 'upload'
+  const [fileProgress, setFileProgress] = useState('');
 
   useEffect(() => {
     if (botId) loadRagConfig();
@@ -54,16 +59,15 @@ export default function RagSettings() {
   }
 
   async function handleSave(e) {
-    e.preventDefault();
+    if (e) e.preventDefault();
     setSaving(true);
     setMessage('');
     try {
       const res = await api.put(`/rag/${botId}`, config);
       await loadBots();
       setChunkCount(res.chunkCount || 0);
-      setMessage('RAG Knowledge configuration saved successfully!');
-      setTimeout(() => setMessage(''), 3000);
-      // Reload config to update masked key and sample chunks if rebuilt
+      setMessage('RAG Knowledge configurations and data saved successfully!');
+      setTimeout(() => setMessage(''), 3500);
       loadRagConfig();
     } catch (err) {
       setMessage('Error: ' + err.message);
@@ -92,6 +96,10 @@ export default function RagSettings() {
   }
 
   async function handleRebuildDatabase() {
+    if (!config.businessInfo?.trim()) {
+      alert('Please add some business details/files first before rebuilding.');
+      return;
+    }
     if (!window.confirm('This will recreate all text chunks and regenerate vector embeddings. Continue?')) return;
     setRebuilding(true);
     setMessage('');
@@ -108,13 +116,96 @@ export default function RagSettings() {
     }
   }
 
+  // Load PDF.js worker dynamically from CDN
+  const loadPdfJs = () => {
+    return new Promise((resolve, reject) => {
+      if (window.pdfjsLib) return resolve(window.pdfjsLib);
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js';
+      script.onload = () => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+        resolve(window.pdfjsLib);
+      };
+      script.onerror = () => reject(new Error('Failed to load PDF parser library from CDN'));
+      document.head.appendChild(script);
+    });
+  };
+
+  // Browser-side PDF text parser
+  const parsePdfText = async (file) => {
+    const pdfjsLib = await loadPdfJs();
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let text = '';
+    for (let i = 1; i <= pdf.numPages; i++) {
+      setFileProgress(`Parsing PDF page ${i} of ${pdf.numPages}...`);
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const strings = content.items.map(item => item.str);
+      text += strings.join(' ') + '\n';
+    }
+    return text;
+  };
+
+  // Browser-side text/md parser
+  const parseTxtText = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsText(file);
+    });
+  };
+
+  // File drop/upload handler
+  async function handleFileUpload(e, mode) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setParsingFile(true);
+    setFileProgress('Initializing file parser...');
+    
+    try {
+      let extractedText = '';
+      if (file.type === 'application/pdf') {
+        extractedText = await parsePdfText(file);
+      } else if (file.name.endsWith('.txt') || file.name.endsWith('.md') || file.name.endsWith('.json') || file.name.endsWith('.csv')) {
+        extractedText = await parseTxtText(file);
+      } else {
+        throw new Error('Unsupported file format. Please upload PDF, TXT, MD, CSV, or JSON.');
+      }
+
+      if (!extractedText.trim()) {
+        throw new Error('Extracted text is empty. Verify file contents.');
+      }
+
+      setFileProgress('Text successfully extracted!');
+      setTimeout(() => setFileProgress(''), 3000);
+
+      // Save to config state
+      setConfig(prev => {
+        const newText = mode === 'append' && prev.businessInfo
+          ? `${prev.businessInfo}\n\n${extractedText}`
+          : extractedText;
+        return { ...prev, businessInfo: newText };
+      });
+      
+      alert(`Text successfully loaded (${extractedText.length} characters). Click "Save Configuration" at the bottom to rebuild vector chunks!`);
+    } catch (err) {
+      alert(`Import failed: ${err.message}`);
+      setFileProgress('');
+    } finally {
+      setParsingFile(false);
+    }
+  }
+
   function updateField(field, value) {
     setConfig(prev => {
       const updated = { ...prev, [field]: value };
-      // Auto-set default models on provider switch
       if (field === 'ragProvider') {
         if (value === 'openai') updated.ragModel = 'text-embedding-3-small';
         else if (value === 'gemini') updated.ragModel = 'text-embedding-004';
+        else if (value === 'openrouter') updated.ragModel = 'openai/text-embedding-3-small';
         else if (value === 'custom') updated.ragModel = 'text-embedding-3-small|https://api.myendpoint.com/v1/embeddings';
       }
       return updated;
@@ -132,7 +223,7 @@ export default function RagSettings() {
   return (
     <div className="max-w-4xl space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-gray-900">RAG (Retrieval-Augmented Generation) Knowledge Settings</h2>
+        <h2 className="text-2xl font-bold text-gray-900">RAG (Retrieval-Augmented Generation) Knowledge</h2>
         <p className="text-gray-500 mt-1">Optimize chatbot answers by performing real-time semantic context retrieval for massive business files</p>
       </div>
 
@@ -142,30 +233,126 @@ export default function RagSettings() {
         </div>
       )}
 
-      <form onSubmit={handleSave} className="space-y-6">
-        {/* Toggle RAG */}
-        <div className="card">
-          <div className="flex items-center justify-between">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 bg-primary-50 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                <Database className="w-5 h-5 text-primary-600" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900">Enable RAG Semantic Search</h3>
-                <p className="text-sm text-gray-500 mt-0.5">When active, the AI splits your business details and retrieves matching parts in real-time, preventing context window limits.</p>
-              </div>
+      {/* Toggle RAG */}
+      <div className="card">
+        <div className="flex items-center justify-between">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 bg-primary-50 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+              <Database className="w-5 h-5 text-primary-600" />
             </div>
-            <button
-              type="button"
-              onClick={() => updateField('ragEnabled', !config.ragEnabled)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${config.ragEnabled ? 'bg-primary-600' : 'bg-gray-300'}`}
-            >
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${config.ragEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
-            </button>
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">Enable RAG Semantic Search</h3>
+              <p className="text-sm text-gray-500 mt-0.5">When active, the AI splits your business details and retrieves matching parts in real-time, preventing context window limits.</p>
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={() => updateField('ragEnabled', !config.ragEnabled)}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${config.ragEnabled ? 'bg-primary-600' : 'bg-gray-300'}`}
+          >
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${config.ragEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+          </button>
+        </div>
+      </div>
+
+      <form onSubmit={handleSave} className="space-y-6">
+        {/* Knowledge Base Input Options */}
+        <div className="card space-y-4">
+          <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+            <div className="flex items-center gap-2">
+              <FileText className="w-5 h-5 text-primary-600" />
+              <h3 className="text-lg font-semibold text-gray-900">Manage Knowledge Base Data</h3>
+            </div>
+            
+            {/* Input option tab selector */}
+            <div className="flex bg-gray-100 p-0.5 rounded-lg text-xs">
+              <button
+                type="button"
+                onClick={() => setInputTab('text')}
+                className={`px-3 py-1.5 rounded-md font-semibold transition-colors ${inputTab === 'text' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
+              >
+                Paste Plain Text
+              </button>
+              <button
+                type="button"
+                onClick={() => setInputTab('upload')}
+                className={`px-3 py-1.5 rounded-md font-semibold transition-colors ${inputTab === 'upload' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
+              >
+                Import Files (PDF, TXT)
+              </button>
+            </div>
+          </div>
+
+          {!config.ragEnabled && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs">
+              ℹ️ <strong>RAG is currently disabled.</strong> While RAG is off, the text inside this box is sent entirely to the LLM system prompt. Enable RAG above to utilize dynamic vector chunking.
+            </div>
+          )}
+
+          {inputTab === 'text' ? (
+            <div>
+              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Raw Business Details</label>
+              <textarea
+                value={config.businessInfo}
+                onChange={e => updateField('businessInfo', e.target.value)}
+                className="input-field min-h-[220px] font-mono text-sm leading-relaxed"
+                placeholder="Describe your business, products, services, FAQs, and database info here..."
+                rows={10}
+              />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="border-2 border-dashed border-gray-200 hover:border-primary-400 rounded-xl p-8 text-center bg-gray-50/50 cursor-pointer transition-colors relative">
+                <input
+                  type="file"
+                  accept=".txt,.md,.pdf,.json,.csv"
+                  onChange={e => handleFileUpload(e, 'replace')}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  disabled={parsingFile}
+                />
+                <Upload className="w-10 h-10 text-gray-400 mx-auto mb-2.5" />
+                <h4 className="font-semibold text-gray-800 text-sm">Upload & Replace Knowledge Source</h4>
+                <p className="text-xs text-gray-400 mt-1">Supports PDF, TXT, MD, CSV, or JSON (max 10MB)</p>
+              </div>
+
+              <div className="flex items-center justify-center gap-4 text-xs">
+                <span className="text-gray-400">Or append to current knowledge:</span>
+                <label className="text-primary-600 hover:text-primary-700 font-bold cursor-pointer border border-primary-200 rounded-lg px-3 py-1.5 hover:bg-primary-50 transition-colors">
+                  <input
+                    type="file"
+                    accept=".txt,.md,.pdf,.json,.csv"
+                    onChange={e => handleFileUpload(e, 'append')}
+                    className="hidden"
+                    disabled={parsingFile}
+                  />
+                  + Append File
+                </label>
+              </div>
+
+              {parsingFile && (
+                <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl text-indigo-700 text-xs flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>{fileProgress}</span>
+                </div>
+              )}
+
+              {config.businessInfo && (
+                <div className="border border-gray-200 rounded-xl bg-gray-50 p-4 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-semibold text-gray-400 uppercase">Extracted Knowledge Base Character Preview</span>
+                    <span className="text-[10px] text-gray-500 font-medium">({config.businessInfo.length.toLocaleString()} characters)</span>
+                  </div>
+                  <pre className="text-xs text-gray-600 bg-white border border-gray-200 rounded-lg p-3 max-h-48 overflow-y-auto font-mono leading-relaxed whitespace-pre-wrap">
+                    {config.businessInfo.substring(0, 1000)}
+                    {config.businessInfo.length > 1000 ? '...' : ''}
+                  </pre>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Configuration details */}
+        {/* Configurations Details */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Settings Box */}
           <div className="lg:col-span-2 space-y-6">
@@ -185,6 +372,7 @@ export default function RagSettings() {
                   >
                     <option value="openai">OpenAI</option>
                     <option value="gemini">Google Gemini</option>
+                    <option value="openrouter">OpenRouter</option>
                     <option value="custom">Custom Endpoint (OpenAI Compatible)</option>
                   </select>
                 </div>
@@ -306,7 +494,7 @@ export default function RagSettings() {
           <div className="space-y-6">
             <div className="p-5 bg-indigo-950 text-white rounded-2xl shadow-xl space-y-4">
               <h4 className="font-bold text-base flex items-center gap-1.5">
-                <Info className="w-5 h-5 text-indigo-300" /> What is RAG?
+                <HelpCircle className="w-5 h-5 text-indigo-300" /> What is RAG?
               </h4>
               <p className="text-xs leading-relaxed text-indigo-200">
                 RAG (Retrieval-Augmented Generation) is an industry-grade approach to handle huge company files, catalogs, or knowledge bases.

@@ -106,6 +106,42 @@ async function generateEmbedding(text, provider, apiKey, model) {
       req.write(body);
       req.end();
     });
+  } else if (cleanProvider === 'openrouter') {
+    const activeModel = model || 'openai/text-embedding-3-small';
+    const body = JSON.stringify({ model: activeModel, input: text });
+    
+    return new Promise((resolve, reject) => {
+      const req = https.request({
+        hostname: 'openrouter.ai',
+        path: '/api/v1/embeddings',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          'HTTP-Referer': 'https://openrouter.ai',
+          'X-Title': 'Chatbot RAG'
+        },
+        timeout: 15000
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data);
+            if (res.statusCode >= 400) {
+              reject(new Error(`OpenRouter Embedding Error (${res.statusCode}): ${parsed.error?.message || data}`));
+            } else {
+              resolve(parsed.data[0].embedding);
+            }
+          } catch(e) {
+            reject(new Error('Failed to parse OpenRouter embedding response'));
+          }
+        });
+      });
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
   } else if (cleanProvider === 'custom') {
     // Custom OpenAI compatible endpoint: expects model and custom URL
     // We parse custom URL from the model or model field: format can be e.g. "model_name|https://api.mycustomendpoint.com/v1/embeddings"

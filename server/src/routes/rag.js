@@ -137,7 +137,7 @@ router.post('/:botId/rebuild', async (req, res) => {
 router.put('/:botId', async (req, res) => {
   try {
     const { botId } = req.params;
-    const { ragEnabled, ragProvider, ragApiKey, ragModel } = req.body;
+    const { ragEnabled, ragProvider, ragApiKey, ragModel, businessInfo } = req.body;
 
     const chatbot = await prisma.chatbot.findFirst({
       where: { id: botId, adminId: req.admin.id }
@@ -160,7 +160,8 @@ router.put('/:botId', async (req, res) => {
         ragEnabled: ragEnabled ?? chatbot.ragEnabled,
         ragProvider: ragProvider || chatbot.ragProvider,
         ragApiKey: updatedApiKey,
-        ragModel: ragModel || chatbot.ragModel
+        ragModel: ragModel || chatbot.ragModel,
+        ...(businessInfo !== undefined && { businessInfo })
       }
     });
 

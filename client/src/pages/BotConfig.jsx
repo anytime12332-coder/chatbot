@@ -28,6 +28,7 @@ export default function BotConfig() {
         businessInfo: data.businessInfo || '', systemPrompt: data.systemPrompt || '',
         welcomeMessage: data.welcomeMessage || '', primaryColor: data.primaryColor || '#6366f1',
         position: data.position || 'bottom-right', isActive: data.isActive ?? true,
+        ragEnabled: data.ragEnabled ?? false,
       });
     } catch (err) {
       console.error('Load config error:', err);
@@ -113,8 +114,19 @@ export default function BotConfig() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Business Information</label>
-              <textarea value={config.businessInfo} onChange={e => updateField('businessInfo', e.target.value)} className="input-field min-h-[120px]"
-                placeholder="Describe your business, products, services, hours, location, policies, FAQs, etc." rows={5} />
+              {config.ragEnabled ? (
+                <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs mb-3">
+                  ⚠️ <strong>RAG Semantic Search is active.</strong> You cannot edit this box directly because your business information is split and managed in the <strong>RAG Knowledge</strong> tab. Please go there to upload or edit data (PDFs, TXT, doc files).
+                </div>
+              ) : null}
+              <textarea
+                value={config.businessInfo}
+                onChange={e => updateField('businessInfo', e.target.value)}
+                className="input-field min-h-[120px] disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed"
+                placeholder="Describe your business, products, services, hours, location, policies, FAQs, etc."
+                rows={5}
+                disabled={config.ragEnabled}
+              />
             </div>
           </div>
         </div>
