@@ -184,6 +184,9 @@ export default function Conversations() {
                       {conv.leadStatus === 'completed' && (
                         <span className="text-[10px] px-2 py-0.5 bg-indigo-100 text-indigo-700 font-bold rounded-full">Lead</span>
                       )}
+                      {conv.leadStatus === 'collecting' && (
+                        <span className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-700 font-bold rounded-full">Collecting</span>
+                      )}
                       <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${conv.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{conv.status}</span>
                     </div>
                   </div>

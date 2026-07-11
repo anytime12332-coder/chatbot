@@ -229,6 +229,17 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
           updatedAt: new Date()
         }
       });
+
+      // Upsert Lead row progressively
+      await prisma.lead.upsert({
+        where: { conversationId: conversation.id },
+        update: { details: collectedDataStr },
+        create: {
+          chatbotId: chatbot.id,
+          conversationId: conversation.id,
+          details: collectedDataStr
+        }
+      });
       
       const nextQuestion = questions[nextIndex];
       const assistantMessage = await prisma.message.create({
@@ -264,9 +275,11 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
         }
       });
       
-      // Save Lead row
-      const lead = await prisma.lead.create({
-        data: {
+      // Upsert final Lead row
+      const lead = await prisma.lead.upsert({
+        where: { conversationId: conversation.id },
+        update: { details: collectedDataStr },
+        create: {
           chatbotId: chatbot.id,
           conversationId: conversation.id,
           details: collectedDataStr
