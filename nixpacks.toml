@@ -1,0 +1,17 @@
+[phases.setup]
+nixPkgs = ["nodejs-18_x"]
+
+[phases.install]
+cmds = [
+  "cd server && npm install",
+  "cd client && npm install"
+]
+
+[phases.build]
+cmds = [
+  "cd server && npx prisma generate",
+  "cd client && npm run build"
+]
+
+[start]
+cmd = "cd server && npx prisma migrate deploy && node src/seed.js && node src/index.js"

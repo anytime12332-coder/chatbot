@@ -1,0 +1,119 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Admin {
+  id        String     @id @default(uuid())
+  email     String     @unique
+  password  String
+  name      String     @default("Admin")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  chatbots  Chatbot[]
+}
+
+model Chatbot {
+  id             String   @id @default(uuid())
+  name           String   @default("My Chatbot")
+  businessName   String   @default("")
+  businessInfo   String   @default("") @db.Text
+  systemPrompt   String   @default("You are a helpful assistant.") @db.Text
+  welcomeMessage String   @default("Hello! How can I help you today?")
+  primaryColor   String   @default("#6366f1")
+  position       String   @default("bottom-right")
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  adminId       String
+  admin         Admin          @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  apiConfig     ApiConfig?
+  conversations Conversation[]
+
+  // Lead collection configurations
+  leadCollectionEnabled Boolean @default(false)
+  leadTriggerPrompt     String  @default("When a user asks to buy a service, get a quote, hire us, contact support, or become a lead.") @db.Text
+  leadQuestions         String  @default("[]") @db.Text // JSON list of questions
+  webhookUrl            String  @default("") @db.Text
+  leadStorageOption     String  @default("both") // "inbox", "separate", or "both"
+  leads                 Lead[]
+
+  @@index([adminId])
+}
+
+model ApiConfig {
+  id          String   @id @default(uuid())
+  provider    String   @default("openai")
+  apiKey      String   @default("") @db.Text
+  model       String   @default("gpt-3.5-turbo")
+  baseUrl     String   @default("")
+  maxTokens   Int      @default(1024)
+  temperature Float    @default(0.7)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  chatbotId String  @unique
+  chatbot   Chatbot @relation(fields: [chatbotId], references: [id], onDelete: Cascade)
+}
+
+model Conversation {
+  id          String   @id @default(uuid())
+  sessionId   String
+  visitorIp   String   @default("")
+  visitorName String   @default("Visitor")
+  pageUrl     String   @default("")
+  status      String   @default("active")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  chatbotId String
+  chatbot   Chatbot   @relation(fields: [chatbotId], references: [id], onDelete: Cascade)
+  messages  Message[]
+
+  // Lead collection states
+  leadStatus           String @default("inactive") // "inactive", "collecting", "completed"
+  currentQuestionIndex Int    @default(0)
+  collectedData        String @default("{}") @db.Text // JSON string for collected fields
+  lead                 Lead?
+
+  @@index([sessionId])
+  @@index([chatbotId])
+  @@index([createdAt])
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  role           String
+  content        String   @db.Text
+  tokenCount     Int      @default(0)
+  responseTimeMs Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([createdAt])
+  @@index([role])
+}
+
+model Lead {
+  id             String        @id @default(uuid())
+  chatbotId      String
+  conversationId String?       @unique
+  details        String        @db.Text // JSON string of lead fields
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  chatbot        Chatbot       @relation(fields: [chatbotId], references: [id], onDelete: Cascade)
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([chatbotId])
+}
+
