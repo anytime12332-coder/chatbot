@@ -105,11 +105,11 @@ router.post('/:botId/rebuild', async (req, res) => {
 
     // If RAG is enabled, query embeddings and save
     const savedChunks = [];
-    for (const chunk of chunks) {
+    for (const chunkObj of chunks) {
       let embeddingStr = '[]';
       if (chatbot.ragEnabled && decryptedKey) {
         try {
-          const embeddingVector = await generateEmbedding(chunk, chatbot.ragProvider, decryptedKey, chatbot.ragModel);
+          const embeddingVector = await generateEmbedding(chunkObj.content, chatbot.ragProvider, decryptedKey, chatbot.ragModel);
           embeddingStr = JSON.stringify(embeddingVector);
         } catch (e) {
           console.warn(`Failed to generate embedding for chunk: ${e.message}. Saving without embedding.`);
@@ -119,8 +119,9 @@ router.post('/:botId/rebuild', async (req, res) => {
       const newChunk = await prisma.documentChunk.create({
         data: {
           chatbotId: botId,
-          content: chunk,
-          embedding: embeddingStr
+          content: chunkObj.content,
+          embedding: embeddingStr,
+          chunkIndex: chunkObj.chunkIndex
         }
       });
       savedChunks.push(newChunk);
@@ -176,11 +177,11 @@ router.put('/:botId', async (req, res) => {
       if (chunks.length > 0) {
         await prisma.documentChunk.deleteMany({ where: { chatbotId: botId } });
         
-        for (const chunk of chunks) {
+        for (const chunkObj of chunks) {
           let embeddingStr = '[]';
           if (decryptedKey) {
             try {
-              const embeddingVector = await generateEmbedding(chunk, updated.ragProvider, decryptedKey, updated.ragModel);
+              const embeddingVector = await generateEmbedding(chunkObj.content, updated.ragProvider, decryptedKey, updated.ragModel);
               embeddingStr = JSON.stringify(embeddingVector);
             } catch (e) {
               console.warn(`Auto-embedding generation failed: ${e.message}`);
@@ -189,8 +190,9 @@ router.put('/:botId', async (req, res) => {
           await prisma.documentChunk.create({
             data: {
               chatbotId: botId,
-              content: chunk,
-              embedding: embeddingStr
+              content: chunkObj.content,
+              embedding: embeddingStr,
+              chunkIndex: chunkObj.chunkIndex
             }
           });
         }

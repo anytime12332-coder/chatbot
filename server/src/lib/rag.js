@@ -4,28 +4,71 @@ const prisma = require('./prisma');
 const { decrypt } = require('./encryption');
 
 /**
- * Split text into overlapping chunks
+ * Split text into overlapping chunks, preserving paragraphs and formatting.
  */
-function splitTextIntoChunks(text, chunkSize = 800, overlap = 150) {
+function splitTextIntoChunks(text, chunkSize = 1200, overlap = 200) {
   if (!text || !text.trim()) return [];
-  const cleanText = text.replace(/\s+/g, ' ').trim();
-  const chunks = [];
-  let index = 0;
 
-  while (index < cleanText.length) {
-    let end = index + chunkSize;
-    if (end < cleanText.length) {
-      // Avoid splitting words if possible
-      const lastSpace = cleanText.lastIndexOf(' ', end);
-      if (lastSpace > index + chunkSize * 0.7) {
-        end = lastSpace;
-      }
+  // Step 1: Normalize spacing without destroying newlines (don't collapse all vertical whitespace to single spaces)
+  const normalized = text
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+/g, ' ') // Collapse multiple spaces or tabs
+    .replace(/\n{3,}/g, '\n\n') // Limit maximum sequential paragraph breaks to 2
+    .trim();
+
+  // Step 2: Split on paragraph breaks first to maintain cohesive topics
+  const paragraphs = normalized.split(/\n\n+/);
+  const chunks = [];
+  let currentChunkText = '';
+  let chunkIndex = 0;
+
+  for (const para of paragraphs) {
+    const paraText = para.trim();
+    if (!paraText) continue;
+
+    // If adding this paragraph exceeds chunkSize, finalize current chunk
+    if (currentChunkText && (currentChunkText.length + paraText.length + 2) > chunkSize) {
+      chunks.push({
+        content: currentChunkText.trim(),
+        chunkIndex: chunkIndex++
+      });
+
+      // Implement semantic overlap: carry over the last line or trailing sentence structure if possible
+      const lines = currentChunkText.split('\n');
+      const carryOverLines = lines.slice(-2).join('\n');
+      currentChunkText = carryOverLines ? carryOverLines + '\n\n' + paraText : paraText;
+    } else {
+      currentChunkText = currentChunkText ? currentChunkText + '\n\n' + paraText : paraText;
     }
-    const chunk = cleanText.substring(index, end).trim();
-    if (chunk) chunks.push(chunk);
-    index = end - overlap;
-    if (index >= cleanText.length - overlap) break;
+
+    // Handle edge case where a single paragraph is too large (split it by sentences)
+    if (currentChunkText.length > chunkSize * 1.5) {
+      const sentences = currentChunkText.match(/[^.!?]+[.!?]+(\s|$)/g) || [currentChunkText];
+      let sentenceChunk = '';
+      for (const sentence of sentences) {
+        if (sentenceChunk && (sentenceChunk.length + sentence.length) > chunkSize) {
+          chunks.push({
+            content: sentenceChunk.trim(),
+            chunkIndex: chunkIndex++
+          });
+          // Carry over the last sentence for context overlap
+          sentenceChunk = sentenceChunk.split(/[.!?]+/).slice(-2).join('. ') + '. ' + sentence;
+        } else {
+          sentenceChunk = sentenceChunk ? sentenceChunk + ' ' + sentence : sentence;
+        }
+      }
+      currentChunkText = sentenceChunk;
+    }
   }
+
+  // Add final leftover chunk
+  if (currentChunkText.trim()) {
+    chunks.push({
+      content: currentChunkText.trim(),
+      chunkIndex: chunkIndex++
+    });
+  }
+
   return chunks;
 }
 
@@ -143,8 +186,6 @@ async function generateEmbedding(text, provider, apiKey, model) {
       req.end();
     });
   } else if (cleanProvider === 'custom') {
-    // Custom OpenAI compatible endpoint: expects model and custom URL
-    // We parse custom URL from the model or model field: format can be e.g. "model_name|https://api.mycustomendpoint.com/v1/embeddings"
     let endpointUrl = 'https://api.openai.com/v1/embeddings';
     let activeModel = 'text-embedding-3-small';
     if (model.includes('|')) {
@@ -225,7 +266,6 @@ function keywordSearch(query, chunks, limit = 4) {
     queryWords.forEach(word => {
       if (contentLower.includes(word)) {
         score += 1;
-        // extra points for exact word boundary matches
         const regex = new RegExp('\\b' + word + '\\b', 'g');
         const matches = contentLower.match(regex);
         if (matches) score += matches.length * 1.5;
@@ -245,6 +285,8 @@ function keywordSearch(query, chunks, limit = 4) {
  * Retrieve top relevant chunks for a user query
  */
 async function retrieveRelevantContext(query, chatbot, limit = 4) {
+  const SIMILARITY_THRESHOLD = 0.25; // Exclude completely irrelevant matches
+
   const chunks = await prisma.documentChunk.findMany({
     where: { chatbotId: chatbot.id }
   });
@@ -254,7 +296,9 @@ async function retrieveRelevantContext(query, chatbot, limit = 4) {
   // If RAG configurations are missing or disabled, fall back to keyword search
   if (!chatbot.ragEnabled || !chatbot.ragApiKey) {
     const matched = keywordSearch(query, chunks, limit);
-    return matched.map(c => c.content).join('\n\n');
+    // Restore document reading order
+    matched.sort((a, b) => a.chunkIndex - b.chunkIndex);
+    return matched.map(c => c.content).join('\n\n---\n\n');
   }
 
   try {
@@ -272,15 +316,27 @@ async function retrieveRelevantContext(query, chatbot, limit = 4) {
     });
 
     const matched = scored
+      .filter(item => item.similarity >= SIMILARITY_THRESHOLD)
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, limit)
       .map(item => item.chunk);
 
-    return matched.map(c => c.content).join('\n\n');
+    // If embedding search yielded nothing above threshold, perform keyword fallback
+    if (matched.length === 0) {
+      const fallbackMatched = keywordSearch(query, chunks, 3);
+      fallbackMatched.sort((a, b) => a.chunkIndex - b.chunkIndex);
+      return fallbackMatched.map(c => c.content).join('\n\n---\n\n');
+    }
+
+    // Re-sort results chronologically by chunkIndex to preserve narrative order
+    matched.sort((a, b) => a.chunkIndex - b.chunkIndex);
+
+    return matched.map(c => c.content).join('\n\n---\n\n');
   } catch (err) {
     console.warn('Embedding search failed, using keyword search fallback:', err.message);
     const matched = keywordSearch(query, chunks, limit);
-    return matched.map(c => c.content).join('\n\n');
+    matched.sort((a, b) => a.chunkIndex - b.chunkIndex);
+    return matched.map(c => c.content).join('\n\n---\n\n');
   }
 }
 

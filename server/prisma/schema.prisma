@@ -125,11 +125,13 @@ model Lead {
 }
 
 model DocumentChunk {
-  id         String   @id @default(uuid())
-  chatbotId  String
-  content    String   @db.Text
-  embedding  String   @db.Text // JSON stringified float array
-  createdAt  DateTime @default(now())
+  id            String   @id @default(uuid())
+  chatbotId     String
+  content       String   @db.Text
+  embedding     String   @db.Text // JSON stringified float array
+  chunkIndex    Int      @default(0)
+  sourceSection String?
+  createdAt     DateTime @default(now())
 
   chatbot    Chatbot  @relation(fields: [chatbotId], references: [id], onDelete: Cascade)
 

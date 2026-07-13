@@ -22,7 +22,8 @@ function buildSystemPrompt(chatbot) {
 }
 
 /**
- * Get or create conversation + build AI messages
+ * Get or create conversation + build AI messages array.
+ * Also returns the raw history array for use in classifyIntent.
  */
 async function prepareChat(message, sessionId, chatbotId, pageUrl, ip) {
   const chatbot = await prisma.chatbot.findUnique({
@@ -53,8 +54,7 @@ async function prepareChat(message, sessionId, chatbotId, pageUrl, ip) {
   // The most recent 20 messages are fetched newest-first; restore chronological order
   const history = [...conversation.messages].reverse();
 
-  // Save user message and bump the conversation's updatedAt so inbox/dashboard
-  // lists ordered by updatedAt reflect the latest activity
+  // Save user message and bump the conversation's updatedAt
   await prisma.message.create({
     data: { role: 'user', content: message.trim(), conversationId: conversation.id },
   });
@@ -63,12 +63,12 @@ async function prepareChat(message, sessionId, chatbotId, pageUrl, ip) {
     data: { updatedAt: new Date() },
   });
 
-  // Build AI messages
+  // Build AI messages (with RAG if enabled)
   let systemPromptText = '';
   if (chatbot.ragEnabled) {
     const { retrieveRelevantContext } = require('../lib/rag');
     const retrievedContext = await retrieveRelevantContext(message.trim(), chatbot);
-    
+
     const parts = [];
     if (chatbot.systemPrompt) parts.push(chatbot.systemPrompt);
     if (chatbot.businessName) parts.push(`Business Name: ${chatbot.businessName}`);
@@ -94,88 +94,112 @@ async function prepareChat(message, sessionId, chatbotId, pageUrl, ip) {
     apiKey: decrypt(chatbot.apiConfig.apiKey),
   };
 
-  return { chatbot, conversation, currentSessionId, aiMessages, decryptedConfig };
+  return { chatbot, conversation, currentSessionId, aiMessages, decryptedConfig, history };
 }
 
 /**
- * Triggers n8n webhook with lead details
+ * Triggers webhook with lead details.
+ * Retries up to `retries` times with linear backoff.
+ * Uses explicit UTF-8 byte length to avoid encoding bugs with non-ASCII characters.
  */
-async function triggerWebhook(url, payload) {
-  if (!url) return;
-  return new Promise((resolve) => {
+async function triggerWebhook(url, payload, retries = 3) {
+  if (!url) return { error: 'No webhook URL provided' };
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const parsedUrl = new URL(url);
-      const client = parsedUrl.protocol === 'https:' ? https : http;
       const body = JSON.stringify(payload);
-      
-      const req = client.request({
-        hostname: parsedUrl.hostname,
-        port: parsedUrl.port,
-        path: parsedUrl.pathname + parsedUrl.search,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(body),
-        },
-        timeout: 10000,
-      }, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          resolve({ status: res.statusCode, data });
+      const result = await new Promise((resolve, reject) => {
+        const parsedUrl = new URL(url);
+        const client = parsedUrl.protocol === 'https:' ? https : http;
+
+        const req = client.request({
+          hostname: parsedUrl.hostname,
+          port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+          path: parsedUrl.pathname + parsedUrl.search,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Content-Length': Buffer.byteLength(body, 'utf8'),
+            'X-Chatbot-Event': payload.event || 'lead.captured',
+            'X-Attempt': String(attempt),
+          },
+          timeout: 10000,
+        }, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => resolve({ status: res.statusCode, data }));
         });
+
+        req.on('error', reject);
+        req.on('timeout', () => {
+          req.destroy();
+          reject(new Error('TIMEOUT'));
+        });
+
+        req.write(body);
+        req.end();
       });
 
-      req.on('error', (err) => {
-        console.error('Webhook error:', err);
-        resolve({ error: err.message });
-      });
-
-      req.on('timeout', () => {
-        req.destroy();
-        resolve({ error: 'Webhook timeout' });
-      });
-
-      req.write(body);
-      req.end();
+      if (result.status >= 200 && result.status < 300) {
+        return result;
+      }
+      throw new Error(`HTTP ${result.status}`);
     } catch (err) {
-      console.error('Webhook parsing error:', err);
-      resolve({ error: err.message });
+      console.warn(`Webhook attempt ${attempt}/${retries} failed:`, err.message);
+      if (attempt < retries) {
+        // Linear backoff: 1s, 2s, 3s...
+        await new Promise(r => setTimeout(r, 1000 * attempt));
+      } else {
+        console.error('Webhook failed after all retries for URL:', url);
+      }
     }
-  });
+  }
+  return { error: `Webhook failed after ${retries} attempts` };
 }
 
 /**
- * Classifies if the message triggers lead capture
+ * Classifies if the user message matches the lead capture trigger.
+ * Uses conversation history for context and strict YES/NO matching.
  */
-async function classifyIntent(message, triggerPrompt, aiConfig) {
+async function classifyIntent(message, triggerPrompt, conversationHistory, aiConfig) {
   try {
+    const recentHistory = conversationHistory || [];
+
+    // Build a short context window (last 4 turns) so the LLM understands state
+    const dialogContext = recentHistory.slice(-4)
+      .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+      .join('\n');
+
     const classificationMessages = [
       {
         role: 'system',
-        content: `You are an AI assistant analyzing a conversation to determine if we should start collecting lead information (like name, email, phone number).
-Determine if the user's latest message indicates interest in the business's services, hiring, requesting a quote/price, getting support, or becoming a lead/contacting.
-Trigger prompt to match: "${triggerPrompt}"
+        content: `You are a highly precise lead-capture classification engine.
+Your ONLY job: check if the user's latest message matches this exact trigger rule:
+"${triggerPrompt}"
 
-Respond with exactly "YES" if the condition matches, otherwise respond with "NO". Do not include any other text.`
+STRICT RULES:
+1. Respond with ONLY the single word YES if the latest message is a CLEAR, DIRECT match for the trigger rule above.
+2. Respond with ONLY the single word NO if the message is a greeting, general question, or does NOT match the trigger rule.
+3. Do NOT output anything else — no punctuation, no explanation, no spaces around the word.`,
       },
       {
         role: 'user',
-        content: `User message: "${message}"`
-      }
+        content: `Conversation context:\n${dialogContext || 'None'}\n\nLatest user message: "${message}"\n\nDoes this match the trigger rule?`,
+      },
     ];
 
     const result = await getAIResponse(classificationMessages, aiConfig);
     const content = result.content?.trim().toUpperCase();
-    return content.includes('YES');
+    // Strict equality — "YES, but..." or "I think YES" won't trigger
+    return content === 'YES';
   } catch (err) {
     console.error('Intent classification failed:', err);
-    return false;
+    return false; // Safe default: don't trigger lead capture on error
   }
 }
 
 /**
- * Extracts a structured value for a field from user response
+ * Extracts a clean structured value from a user's raw answer.
  */
 async function extractValue(message, questionLabel, questionPrompt, aiConfig) {
   try {
@@ -185,12 +209,12 @@ async function extractValue(message, questionLabel, questionPrompt, aiConfig) {
         content: `You are an AI that extracts information from user messages.
 Your task is to extract the answer for "${questionLabel}" from the user's response.
 Reply with ONLY the clean extracted value (e.g. just the email, name, or phone number).
-If the response doesn't contain a clear value, reply with the raw response. Do not add any explanation.`
+If the response doesn't contain a clear value, reply with the raw response. Do not add any explanation.`,
       },
       {
         role: 'user',
-        content: `Question asked: "${questionPrompt}"\nUser response: "${message}"`
-      }
+        content: `Question asked: "${questionPrompt}"\nUser response: "${message}"`,
+      },
     ];
 
     const result = await getAIResponse(extractionMessages, aiConfig);
@@ -202,10 +226,11 @@ If the response doesn't contain a clear value, reply with the raw response. Do n
 }
 
 /**
- * Handles the conversational lead collection intercept.
- * Returns true if the message was handled by the lead flow, false if we should fall back to normal chat.
+ * Handles conversational lead collection flow.
+ * Returns true if this message was consumed by the lead flow (no further normal chat needed).
+ * Returns false if normal AI chat should handle the message.
  */
-async function handleLeadCollection(chatbot, conversation, message, res, isStreaming, decryptedConfig, currentSessionId) {
+async function handleLeadCollection(chatbot, conversation, message, res, isStreaming, decryptedConfig, currentSessionId, history) {
   let questions = [];
   try {
     questions = JSON.parse(chatbot.leadQuestions || '[]');
@@ -213,59 +238,54 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
     console.error('Failed to parse lead questions:', e);
   }
 
+  // ── CASE 1: Already in collection mode — process the user's answer ──
   if (conversation.leadStatus === 'collecting') {
     const currentQuestion = questions[conversation.currentQuestionIndex];
     if (!currentQuestion) {
-      // Index is out of bounds, set status to completed
+      // Index out of bounds — mark completed and let normal chat continue
       await prisma.conversation.update({
         where: { id: conversation.id },
-        data: { leadStatus: 'completed', updatedAt: new Date() }
+        data: { leadStatus: 'completed', updatedAt: new Date() },
       });
       return false;
     }
 
-    // Extract value from user answer
-    const extractedVal = await extractValue(message.trim(), currentQuestion.label, currentQuestion.question, decryptedConfig);
-    
+    // Extract the value from the user's answer using LLM
+    const extractedVal = await extractValue(
+      message.trim(),
+      currentQuestion.label,
+      currentQuestion.question,
+      decryptedConfig
+    );
+
     let collected = {};
-    try {
-      collected = JSON.parse(conversation.collectedData || '{}');
-    } catch(e) {}
-    
+    try { collected = JSON.parse(conversation.collectedData || '{}'); } catch (e) {}
     collected[currentQuestion.id || currentQuestion.label] = extractedVal;
     const collectedDataStr = JSON.stringify(collected);
-    
+
     const nextIndex = conversation.currentQuestionIndex + 1;
-    
+
     if (nextIndex < questions.length) {
-      // Save and show next question
+      // ── More questions remain — save progress and ask next question ──
       await prisma.conversation.update({
         where: { id: conversation.id },
         data: {
           currentQuestionIndex: nextIndex,
           collectedData: collectedDataStr,
-          updatedAt: new Date()
-        }
+          updatedAt: new Date(),
+        },
       });
 
-      // Upsert Lead row progressively
+      // Upsert Lead row progressively so partial data is never lost
       await prisma.lead.upsert({
         where: { conversationId: conversation.id },
         update: { details: collectedDataStr },
-        create: {
-          chatbotId: chatbot.id,
-          conversationId: conversation.id,
-          details: collectedDataStr
-        }
+        create: { chatbotId: chatbot.id, conversationId: conversation.id, details: collectedDataStr },
       });
-      
+
       const nextQuestion = questions[nextIndex];
       const assistantMessage = await prisma.message.create({
-        data: {
-          role: 'assistant',
-          content: nextQuestion.question,
-          conversationId: conversation.id,
-        }
+        data: { role: 'assistant', content: nextQuestion.question, conversationId: conversation.id },
       });
 
       if (isStreaming) {
@@ -278,33 +298,25 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
           reply: nextQuestion.question,
           sessionId: currentSessionId,
           messageId: assistantMessage.id,
-          conversationId: conversation.id
+          conversationId: conversation.id,
         });
       }
       return true;
+
     } else {
-      // Lead collection completed
+      // ── All questions answered — finalize lead ──
       await prisma.conversation.update({
         where: { id: conversation.id },
-        data: {
-          leadStatus: 'completed',
-          collectedData: collectedDataStr,
-          updatedAt: new Date()
-        }
+        data: { leadStatus: 'completed', collectedData: collectedDataStr, updatedAt: new Date() },
       });
-      
-      // Upsert final Lead row
+
       const lead = await prisma.lead.upsert({
         where: { conversationId: conversation.id },
         update: { details: collectedDataStr },
-        create: {
-          chatbotId: chatbot.id,
-          conversationId: conversation.id,
-          details: collectedDataStr
-        }
+        create: { chatbotId: chatbot.id, conversationId: conversation.id, details: collectedDataStr },
       });
-      
-      // Fire webhook
+
+      // Fire webhook (async, with retry — don't block user response)
       if (chatbot.webhookUrl) {
         triggerWebhook(chatbot.webhookUrl, {
           event: 'lead.captured',
@@ -313,28 +325,22 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
           chatbotName: chatbot.name,
           conversationId: conversation.id,
           details: collected,
-          createdAt: lead.createdAt
-        }).catch(err => console.error('Error firing webhook:', err));
+          createdAt: lead.createdAt,
+        }).catch(err => console.error('Webhook fire error:', err));
       }
-      
-      // Thank the user with a natural AI response
+
+      // Thank the user with a natural AI-generated response
       const finalPrompt = [
         {
           role: 'system',
-          content: `The lead collection is complete. Here are the details collected:
-${Object.entries(collected).map(([k, v]) => `- ${k}: ${v}`).join('\n')}
-
-Politely thank the user for providing their details and let them know we will get back to them. If they have any other questions, they can ask.`
+          content: `The lead collection is complete. Here are the details collected:\n${Object.entries(collected).map(([k, v]) => `- ${k}: ${v}`).join('\n')}\n\nPolitely thank the user for providing their details and let them know we will get back to them. If they have any other questions, they can ask.`,
         },
-        {
-          role: 'user',
-          content: message.trim()
-        }
+        { role: 'user', content: message.trim() },
       ];
-      
+
       if (isStreaming) {
         res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
-        
+
         const startTime = Date.now();
         let fullContent = '';
         const aiResult = await aiQueue.add(() =>
@@ -344,7 +350,7 @@ Politely thank the user for providing their details and let them know we will ge
           })
         );
         const responseTimeMs = Date.now() - startTime;
-        
+
         const assistantMessage = await prisma.message.create({
           data: {
             role: 'assistant',
@@ -352,21 +358,16 @@ Politely thank the user for providing their details and let them know we will ge
             tokenCount: aiResult.tokenCount || 0,
             responseTimeMs,
             conversationId: conversation.id,
-          }
+          },
         });
-        
-        res.write(`data: ${JSON.stringify({
-          type: 'done',
-          messageId: assistantMessage.id,
-          tokenCount: aiResult.tokenCount || 0,
-          responseTimeMs
-        })}\n\n`);
+
+        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id, tokenCount: aiResult.tokenCount || 0, responseTimeMs })}\n\n`);
         res.end();
       } else {
         const startTime = Date.now();
         const aiResult = await aiQueue.add(() => getAIResponse(finalPrompt, decryptedConfig));
         const responseTimeMs = Date.now() - startTime;
-        
+
         const assistantMessage = await prisma.message.create({
           data: {
             role: 'assistant',
@@ -374,38 +375,38 @@ Politely thank the user for providing their details and let them know we will ge
             tokenCount: aiResult.tokenCount,
             responseTimeMs,
             conversationId: conversation.id,
-          }
+          },
         });
-        
+
         res.json({
           reply: aiResult.content,
           sessionId: currentSessionId,
           messageId: assistantMessage.id,
-          conversationId: conversation.id
+          conversationId: conversation.id,
         });
       }
       return true;
     }
-  } else if (conversation.leadStatus === 'inactive' && chatbot.leadCollectionEnabled && questions.length > 0) {
-    // Check if user triggers lead capture
-    const isLeadIntent = await classifyIntent(message.trim(), chatbot.leadTriggerPrompt, decryptedConfig);
+  }
+
+  // ── CASE 2: Not collecting — check if this message should trigger lead capture ──
+  if (conversation.leadStatus === 'inactive' && chatbot.leadCollectionEnabled && questions.length > 0) {
+    const isLeadIntent = await classifyIntent(
+      message.trim(),
+      chatbot.leadTriggerPrompt,
+      history,          // Pass full conversation history for context
+      decryptedConfig
+    );
+
     if (isLeadIntent) {
       await prisma.conversation.update({
         where: { id: conversation.id },
-        data: {
-          leadStatus: 'collecting',
-          currentQuestionIndex: 0,
-          updatedAt: new Date()
-        }
+        data: { leadStatus: 'collecting', currentQuestionIndex: 0, updatedAt: new Date() },
       });
-      
+
       const firstQuestion = questions[0];
       const assistantMessage = await prisma.message.create({
-        data: {
-          role: 'assistant',
-          content: firstQuestion.question,
-          conversationId: conversation.id,
-        }
+        data: { role: 'assistant', content: firstQuestion.question, conversationId: conversation.id },
       });
 
       if (isStreaming) {
@@ -418,17 +419,17 @@ Politely thank the user for providing their details and let them know we will ge
           reply: firstQuestion.question,
           sessionId: currentSessionId,
           messageId: assistantMessage.id,
-          conversationId: conversation.id
+          conversationId: conversation.id,
         });
       }
       return true;
     }
   }
-  
+
   return false;
 }
 
-// POST /api/chat/message - Non-streaming chat (backward compatible)
+// POST /api/chat/message - Non-streaming chat
 router.post('/message', async (req, res) => {
   try {
     const { message, sessionId, botId, pageUrl } = req.body;
@@ -436,7 +437,6 @@ router.post('/message', async (req, res) => {
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    // If no botId, find the first active chatbot
     let chatbotId = botId;
     if (!chatbotId) {
       const defaultBot = await prisma.chatbot.findFirst({ where: { isActive: true } });
@@ -444,13 +444,13 @@ router.post('/message', async (req, res) => {
       chatbotId = defaultBot.id;
     }
 
-    const { chatbot, conversation, currentSessionId, aiMessages, decryptedConfig } = await prepareChat(
+    const { chatbot, conversation, currentSessionId, aiMessages, decryptedConfig, history } = await prepareChat(
       message, sessionId, chatbotId, pageUrl, req.ip
     );
 
     // Intercept for conversational lead collection
     const leadHandled = await handleLeadCollection(
-      chatbot, conversation, message, res, false, decryptedConfig, currentSessionId
+      chatbot, conversation, message, res, false, decryptedConfig, currentSessionId, history
     );
     if (leadHandled) return;
 
@@ -499,11 +499,11 @@ router.post('/stream', async (req, res) => {
       chatbotId = defaultBot.id;
     }
 
-    const { chatbot, conversation, currentSessionId, aiMessages, decryptedConfig } = await prepareChat(
+    const { chatbot, conversation, currentSessionId, aiMessages, decryptedConfig, history } = await prepareChat(
       message, sessionId, chatbotId, pageUrl, req.ip
     );
 
-    // Set up SSE headers BEFORE any streaming writes (including the lead intercept)
+    // Set SSE headers BEFORE any writes (including the lead intercept)
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -513,11 +513,11 @@ router.post('/stream', async (req, res) => {
 
     // Intercept for conversational lead collection (SSE headers already sent)
     const leadHandled = await handleLeadCollection(
-      chatbot, conversation, message, res, true, decryptedConfig, currentSessionId
+      chatbot, conversation, message, res, true, decryptedConfig, currentSessionId, history
     );
     if (leadHandled) return;
 
-    // Send session info first
+    // Normal streaming AI response
     res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
 
     const startTime = Date.now();
@@ -532,7 +532,6 @@ router.post('/stream', async (req, res) => {
 
     const responseTimeMs = Date.now() - startTime;
 
-    // Save the complete assistant message
     const assistantMessage = await prisma.message.create({
       data: {
         role: 'assistant',
@@ -543,7 +542,6 @@ router.post('/stream', async (req, res) => {
       },
     });
 
-    // Send completion event
     res.write(`data: ${JSON.stringify({
       type: 'done',
       messageId: assistantMessage.id,
@@ -573,7 +571,6 @@ router.get('/conversations/:chatbotId', authMiddleware, async (req, res) => {
     const { page = 1, limit = 20, status } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Verify ownership
     const chatbot = await prisma.chatbot.findFirst({
       where: { id: chatbotId, adminId: req.admin.id },
     });
