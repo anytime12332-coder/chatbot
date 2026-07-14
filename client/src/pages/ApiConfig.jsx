@@ -109,7 +109,7 @@ export default function ApiConfig() {
                 className={`p-4 rounded-xl border-2 text-center transition-all ${config.provider === provider.id ? 'border-primary-500 bg-primary-50 shadow-sm' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}>
                 <div className="flex items-center justify-center h-8 mb-1">
                   {provider.id === 'openai' && (
-                    <img src="https://cdn.simpleicons.org/openai" alt="OpenAI" className="w-6 h-6 object-contain" />
+                    <img src="https://cdn.simpleicons.org/openai/black" alt="OpenAI" className="w-6 h-6 object-contain" />
                   )}
                   {provider.id === 'gemini' && (
                     <img src="https://cdn.simpleicons.org/googlegemini" alt="Gemini" className="w-6 h-6 object-contain" />
