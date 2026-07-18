@@ -8,7 +8,7 @@ router.get('/config/:botId', async (req, res) => {
   try {
     const chatbot = await prisma.chatbot.findUnique({
       where: { id: req.params.botId },
-      select: { id: true, name: true, welcomeMessage: true, primaryColor: true, position: true, isActive: true },
+      select: { id: true, name: true, welcomeMessage: true, primaryColor: true, position: true, isActive: true, widgetTheme: true },
     });
     if (!chatbot || !chatbot.isActive) {
       return res.status(404).json({ error: 'Bot not found or inactive' });
@@ -25,7 +25,7 @@ router.get('/config', async (req, res) => {
   try {
     const chatbot = await prisma.chatbot.findFirst({
       where: { isActive: true },
-      select: { id: true, name: true, welcomeMessage: true, primaryColor: true, position: true, isActive: true },
+      select: { id: true, name: true, welcomeMessage: true, primaryColor: true, position: true, isActive: true, widgetTheme: true },
     });
     if (!chatbot) return res.status(404).json({ error: 'No active bot found' });
     res.json(chatbot);
@@ -65,48 +65,153 @@ router.get('/embed.js', (req, res) => {
     .catch(function(err) { console.error('Chatbot widget error:', err); });
 
   function initWidget(config) {
-    var primaryColor = config.primaryColor || '#6366f1';
+    var theme = {};
+    try {
+      theme = JSON.parse(config.widgetTheme || '{}');
+    } catch(e) {}
+
+    var templates = {
+      minimal: {
+        primaryColor: '#18181b',
+        headerBg: '#ffffff',
+        headerText: '#18181b',
+        userBubbleBg: '#27272a',
+        userBubbleText: '#ffffff',
+        botBubbleBg: '#f4f4f5',
+        botBubbleText: '#18181b',
+        borderRadius: '8px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+        fontFamily: 'system-ui, -apple-system, sans-serif'
+      },
+      modern_gradient: {
+        primaryColor: '#6366f1',
+        headerBg: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+        headerText: '#ffffff',
+        userBubbleBg: '#6366f1',
+        userBubbleText: '#ffffff',
+        botBubbleBg: '#f3e8ff',
+        botBubbleText: '#1e1b4b',
+        borderRadius: '18px',
+        boxShadow: '0 10px 30px rgba(99, 102, 241, 0.15)',
+        fontFamily: 'system-ui, -apple-system, sans-serif'
+      },
+      corporate: {
+        primaryColor: '#0f172a',
+        headerBg: '#1e293b',
+        headerText: '#ffffff',
+        userBubbleBg: '#0284c7',
+        userBubbleText: '#ffffff',
+        botBubbleBg: '#f8fafc',
+        botBubbleText: '#0f172a',
+        borderRadius: '0px',
+        boxShadow: '0 0 0 1px #e2e8f0, 0 4px 12px rgba(0,0,0,0.05)',
+        fontFamily: 'Georgia, serif'
+      },
+      playful: {
+        primaryColor: '#f43f5e',
+        headerBg: '#f43f5e',
+        headerText: '#ffffff',
+        userBubbleBg: '#f43f5e',
+        userBubbleText: '#ffffff',
+        botBubbleBg: '#ffe4e6',
+        botBubbleText: '#881337',
+        borderRadius: '24px 24px 4px 24px',
+        boxShadow: '0 8px 24px rgba(244, 63, 94, 0.15)',
+        fontFamily: 'BlinkMacSystemFont, sans-serif'
+      },
+      dark_mode: {
+        primaryColor: '#38bdf8',
+        headerBg: '#0f172a',
+        headerText: '#f8fafc',
+        userBubbleBg: '#38bdf8',
+        userBubbleText: '#0f172a',
+        botBubbleBg: '#334155',
+        botBubbleText: '#f8fafc',
+        borderRadius: '16px',
+        boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+        fontFamily: 'system-ui, sans-serif'
+      }
+    };
+
+    var templateId = theme.templateId || 'modern_gradient';
+    var preset = templates[templateId] || templates.modern_gradient;
+
+    var activePrimaryColor = theme.primaryColor || config.primaryColor || preset.primaryColor;
+    var activeHeaderBg = theme.headerBg || activePrimaryColor;
+    var activeUserBubbleBg = theme.userBubbleColor || activePrimaryColor;
+    var activeBotBubbleBg = theme.botBubbleColor || preset.botBubbleBg;
+    var activeBorderRadius = preset.borderRadius;
+    var activeFont = preset.fontFamily;
+    var activeLogo = theme.logoUrl || '';
+    var activeLauncherIcon = theme.launcherIconUrl || '';
+    var activeStarterQuestions = theme.starterQuestions || [];
+
     var position = config.position || 'bottom-right';
     var posRight = position.includes('right') ? '20px' : 'auto';
     var posLeft = position.includes('left') ? '20px' : 'auto';
 
     var style = document.createElement('style');
     style.textContent =
-      '.cb-btn{position:fixed;bottom:20px;right:'+posRight+';left:'+posLeft+';width:60px;height:60px;border-radius:50%;background:'+primaryColor+';border:none;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,.15);z-index:99998;display:flex;align-items:center;justify-content:center;transition:transform .3s,box-shadow .3s}'+
-      '.cb-btn:hover{transform:scale(1.1);box-shadow:0 6px 25px rgba(0,0,0,.2)}'+
-      '.cb-btn svg{width:28px;height:28px;fill:#fff}'+
-      '.cb-box{position:fixed;bottom:90px;right:'+posRight+';left:'+posLeft+';width:380px;max-width:calc(100vw - 40px);height:520px;max-height:calc(100vh - 120px);background:#fff;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,.15);z-index:99999;display:none;flex-direction:column;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}'+
-      '.cb-box.open{display:flex;animation:cb-up .3s ease}'+
-      '@keyframes cb-up{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}'+
-      '.cb-hdr{background:'+primaryColor+';color:#fff;padding:16px 20px;display:flex;align-items:center;justify-content:space-between}'+
-      '.cb-hdr-t{font-size:16px;font-weight:600}'+
-      '.cb-hdr-x{background:none;border:none;color:#fff;cursor:pointer;font-size:20px;padding:0 4px;opacity:.8}'+
-      '.cb-hdr-x:hover{opacity:1}'+
-      '.cb-msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}'+
-      '.cb-m{max-width:85%;padding:10px 14px;border-radius:12px;font-size:14px;line-height:1.5;word-wrap:break-word;white-space:pre-wrap}'+
-      '.cb-m.user{align-self:flex-end;background:'+primaryColor+';color:#fff;border-bottom-right-radius:4px}'+
-      '.cb-m.bot{align-self:flex-start;background:#f1f5f9;color:#1e293b;border-bottom-left-radius:4px}'+
-      '.cb-m.typing{align-self:flex-start;background:#f1f5f9;color:#94a3b8;font-style:italic}'+
-      '.cb-in{padding:12px 16px;border-top:1px solid #e2e8f0;display:flex;gap:8px}'+
-      '.cb-inp{flex:1;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;font-size:14px;outline:none;resize:none;font-family:inherit}'+
-      '.cb-inp:focus{border-color:'+primaryColor+';box-shadow:0 0 0 2px '+primaryColor+'20}'+
-      '.cb-snd{background:'+primaryColor+';border:none;border-radius:8px;padding:10px 16px;cursor:pointer;display:flex;align-items:center;justify-content:center}'+
-      '.cb-snd:disabled{opacity:.5;cursor:not-allowed}'+
-      '.cb-snd svg{width:18px;height:18px;fill:#fff}'+
+      ':root {' +
+      '  --cb-primary: ' + activePrimaryColor + ';' +
+      '  --cb-header-bg: ' + activeHeaderBg + ';' +
+      '  --cb-header-text: ' + preset.headerText + ';' +
+      '  --cb-user-bubble-bg: ' + activeUserBubbleBg + ';' +
+      '  --cb-user-bubble-text: ' + preset.userBubbleText + ';' +
+      '  --cb-bot-bubble-bg: ' + activeBotBubbleBg + ';' +
+      '  --cb-bot-bubble-text: ' + preset.botBubbleText + ';' +
+      '  --cb-border-radius: ' + activeBorderRadius + ';' +
+      '  --cb-font: ' + activeFont + ';' +
+      '  --cb-box-shadow: ' + preset.boxShadow + ';' +
+      '}' +
+      '.cb-btn{position:fixed;bottom:20px;right:'+posRight+';left:'+posLeft+';width:60px;height:60px;border-radius:50%;background:var(--cb-primary);border:none;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,.15);z-index:99998;display:flex;align-items:center;justify-content:center;transition:transform .3s,box-shadow .3s;padding:0}' +
+      '.cb-btn:hover{transform:scale(1.1);box-shadow:0 6px 25px rgba(0,0,0,.2)}' +
+      '.cb-btn svg{width:28px;height:28px;fill:#fff}' +
+      '.cb-box{position:fixed;bottom:90px;right:'+posRight+';left:'+posLeft+';width:380px;max-width:calc(100vw - 40px);height:520px;max-height:calc(100vh - 120px);background:#fff;border-radius:var(--cb-border-radius);box-shadow:var(--cb-box-shadow);z-index:99999;display:none;flex-direction:column;overflow:hidden;font-family:var(--cb-font)}' +
+      '.cb-box.open{display:flex;animation:cb-up .3s ease}' +
+      '@keyframes cb-up{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}' +
+      '.cb-hdr{background:var(--cb-header-bg);color:var(--cb-header-text);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(0,0,0,0.05)}' +
+      '.cb-hdr-t{font-size:16px;font-weight:600}' +
+      '.cb-hdr-x{background:none;border:none;color:inherit;cursor:pointer;font-size:20px;padding:0 4px;opacity:.8}' +
+      '.cb-hdr-x:hover{opacity:1}' +
+      '.cb-msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;background:' + (templateId === 'dark_mode' ? '#1e293b' : '#fff') + '}' +
+      '.cb-m{max-width:85%;padding:10px 14px;border-radius:var(--cb-border-radius);font-size:14px;line-height:1.5;word-wrap:break-word;white-space:pre-wrap}' +
+      '.cb-m.user{align-self:flex-end;background:var(--cb-user-bubble-bg);color:var(--cb-user-bubble-text);border-bottom-right-radius:4px}' +
+      '.cb-m.bot{align-self:flex-start;background:var(--cb-bot-bubble-bg);color:var(--cb-bot-bubble-text);border-bottom-left-radius:4px}' +
+      '.cb-m.typing{align-self:flex-start;background:var(--cb-bot-bubble-bg);color:var(--cb-bot-bubble-text);font-style:italic}' +
+      '.cb-in{padding:12px 16px;border-top:1px solid #e2e8f0;display:flex;gap:8px;background:' + (templateId === 'dark_mode' ? '#0f172a' : '#fff') + '}' +
+      '.cb-inp{flex:1;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;font-size:14px;outline:none;resize:none;font-family:inherit;background:' + (templateId === 'dark_mode' ? '#1e293b' : '#fff') + ';color:' + (templateId === 'dark_mode' ? '#f8fafc' : '#1e293b') + '}' +
+      '.cb-inp:focus{border-color:var(--cb-primary);box-shadow:0 0 0 2px var(--cb-primary)20}' +
+      '.cb-snd{background:var(--cb-primary);border:none;border-radius:8px;padding:10px 16px;cursor:pointer;display:flex;align-items:center;justify-content:center}' +
+      '.cb-snd:disabled{opacity:.5;cursor:not-allowed}' +
+      '.cb-snd svg{width:18px;height:18px;fill:#fff}' +
+      '.cb-chip{background:' + (templateId === 'dark_mode' ? '#334155' : '#f1f5f9') + ';color:var(--cb-primary);border:1px solid ' + (templateId === 'dark_mode' ? '#475569' : '#e2e8f0') + ';padding:6px 12px;border-radius:16px;font-size:12px;cursor:pointer;transition:background 0.2s, transform 0.1s;font-family:inherit;font-weight:500;text-align:left}' +
+      '.cb-chip:hover{background:' + (templateId === 'dark_mode' ? '#475569' : '#e2e8f0') + ';transform:translateY(-1px)}' +
       '@media(max-width:480px){.cb-box{width:calc(100vw - 20px);height:calc(100vh - 100px);right:10px;left:10px;bottom:80px}}';
     document.head.appendChild(style);
 
     var btn = document.createElement('button');
     btn.className = 'cb-btn';
-    btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>';
+    
+    if (activeLauncherIcon) {
+      btn.innerHTML = '<img src="' + activeLauncherIcon + '" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" />';
+    } else {
+      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>';
+    }
     btn.setAttribute('aria-label','Open chat');
     document.body.appendChild(btn);
 
     var box = document.createElement('div');
     box.className = 'cb-box';
+    
+    var logoHtml = activeLogo ? '<img src="' + activeLogo + '" style="height:28px;width:28px;border-radius:50%;margin-right:10px;object-fit:cover;"/>' : '';
+    
     box.innerHTML =
-      '<div class="cb-hdr"><span class="cb-hdr-t">'+(config.name||'Chat')+'</span><button class="cb-hdr-x">&times;</button></div>'+
-      '<div class="cb-msgs"></div>'+
+      '<div class="cb-hdr">' +
+      '  <div style="display:flex;align-items:center;">' + logoHtml + '<span class="cb-hdr-t">' + (config.name||'Chat') + '</span></div>' +
+      '  <button class="cb-hdr-x">&times;</button>' +
+      '</div>' +
+      '<div class="cb-msgs"></div>' +
       '<div class="cb-in"><input class="cb-inp" placeholder="Type a message..."/><button class="cb-snd"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button></div>';
     document.body.appendChild(box);
 
@@ -117,6 +222,26 @@ router.get('/embed.js', (req, res) => {
     var isOpen = false, isSending = false;
 
     addMsg(config.welcomeMessage || 'Hello! How can I help you?', 'bot');
+
+    // Add starter questions as clickable chips below the welcome message
+    if (activeStarterQuestions && activeStarterQuestions.length > 0) {
+      var chipsContainer = document.createElement('div');
+      chipsContainer.className = 'cb-chips-container';
+      chipsContainer.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-top:4px;padding-left:4px;width:100%;';
+      
+      activeStarterQuestions.forEach(function(question) {
+        var chip = document.createElement('button');
+        chip.className = 'cb-chip';
+        chip.textContent = question;
+        chip.onclick = function() {
+          inp.value = question;
+          sendMsg();
+          chipsContainer.remove(); // Remove starter question chips after click
+        };
+        chipsContainer.appendChild(chip);
+      });
+      msgs.appendChild(chipsContainer);
+    }
 
     btn.onclick = function() { isOpen = !isOpen; box.classList.toggle('open', isOpen); if(isOpen) inp.focus(); };
     cls.onclick = function() { isOpen = false; box.classList.remove('open'); };
@@ -133,6 +258,11 @@ router.get('/embed.js', (req, res) => {
     function sendMsg() {
       var text = inp.value.trim();
       if (!text || isSending) return;
+      
+      // If chips container exists, remove it now that the user has started chatting
+      var chips = msgs.querySelector('.cb-chips-container');
+      if (chips) chips.remove();
+
       addMsg(text, 'user');
       inp.value = '';
       isSending = true;
@@ -201,6 +331,7 @@ router.get('/embed.js', (req, res) => {
     inp.onkeypress = function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } };
   }
 })();
+
 `;
 
   res.setHeader('Content-Type', 'application/javascript');

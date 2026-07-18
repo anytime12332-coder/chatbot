@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Bot, Save, Plus, Trash2, ArrowLeft, ArrowUp, ArrowDown, Webhook, ShieldAlert, Sparkles, Check, Database } from 'lucide-react';
+import { Bot, Save, Plus, Trash2, ArrowLeft, ArrowUp, ArrowDown, Webhook, ShieldAlert, Sparkles, Check, Database, Flame, Thermometer, Snowflake } from 'lucide-react';
 import api from '../lib/api';
 import { useBots } from '../context/BotContext';
 
@@ -14,6 +14,16 @@ export default function LeadsConfig() {
     leadTriggerPrompt: '',
     webhookUrl: '',
     leadStorageOption: 'both',
+    leadTriggerMode: 'intent_only',
+    leadTurnThreshold: 3,
+    leadPhoneFormat: 'IN',
+  });
+
+  const [scoringRules, setScoringRules] = useState({
+    hotKeywords: 'urgent, buy now, hire, ready to start, need quote, pricing, today, immediately, asap',
+    warmKeywords: 'interested, looking for, considering, maybe, eventually, exploring options',
+    coldKeywords: 'just browsing, no budget, not ready, someday, maybe later',
+    additionalContext: '',
   });
   
   const [questions, setQuestions] = useState([]);
@@ -36,7 +46,21 @@ export default function LeadsConfig() {
         leadTriggerPrompt: data.leadTriggerPrompt || 'When a user asks to buy a service, get a quote, hire us, contact support, or become a lead.',
         webhookUrl: data.webhookUrl || '',
         leadStorageOption: data.leadStorageOption || 'both',
+        leadTriggerMode: data.leadTriggerMode || 'intent_only',
+        leadTurnThreshold: data.leadTurnThreshold ?? 3,
+        leadPhoneFormat: data.leadPhoneFormat || 'IN',
       });
+
+      // Parse scoring rules
+      try {
+        const parsed = JSON.parse(data.leadScoringRules || '{}');
+        setScoringRules(prev => ({
+          hotKeywords: parsed.hotKeywords ?? prev.hotKeywords,
+          warmKeywords: parsed.warmKeywords ?? prev.warmKeywords,
+          coldKeywords: parsed.coldKeywords ?? prev.coldKeywords,
+          additionalContext: parsed.additionalContext ?? prev.additionalContext,
+        }));
+      } catch (_) {}
       
       // Parse questions
       let parsedQuestions = [];
@@ -70,6 +94,7 @@ export default function LeadsConfig() {
       const payload = {
         ...config,
         leadQuestions: JSON.stringify(questions),
+        leadScoringRules: JSON.stringify(scoringRules),
       };
       await api.put(`/chatbots/${botId}`, payload);
       await loadBots();
@@ -213,22 +238,68 @@ export default function LeadsConfig() {
             <div className="card space-y-4">
               <div className="flex items-center gap-2">
                 <Bot className="w-5 h-5 text-primary-600" />
-                <h3 className="text-lg font-semibold text-gray-900">Lead Trigger Condition</h3>
+                <h3 className="text-lg font-semibold text-gray-900">Lead Trigger Configuration</h3>
               </div>
               <p className="text-sm text-gray-500">
-                Describe the specific customer intent, keywords, or triggers that instruct the chatbot to begin capturing lead information.
+                Configure how and when the chatbot should start asking the qualification questions.
               </p>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Trigger Description</label>
-                <textarea
-                  value={config.leadTriggerPrompt}
-                  onChange={e => updateField('leadTriggerPrompt', e.target.value)}
-                  className="input-field min-h-[100px]"
-                  placeholder="e.g., When the customer expresses interest in hiring services, buying products, requesting a quote, pricing info, or scheduling a demo."
-                  rows={3}
-                  required
-                />
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Trigger Mode</label>
+                  <select
+                    value={config.leadTriggerMode}
+                    onChange={e => updateField('leadTriggerMode', e.target.value)}
+                    className="input-field text-sm"
+                  >
+                    <option value="intent_only">Buying Intent Detection (AI Classifier)</option>
+                    <option value="turn_threshold">Turn Threshold (Trigger after N messages)</option>
+                    <option value="manual_only">Manual Only (Trigger from Inbox by staff)</option>
+                  </select>
+                </div>
+
+                {config.leadTriggerMode === 'turn_threshold' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Turn Threshold (N messages)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={config.leadTurnThreshold}
+                      onChange={e => updateField('leadTurnThreshold', parseInt(e.target.value) || 3)}
+                      className="input-field text-sm"
+                      required
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Phone Number Country Format</label>
+                  <select
+                    value={config.leadPhoneFormat}
+                    onChange={e => updateField('leadPhoneFormat', e.target.value)}
+                    className="input-field text-sm"
+                  >
+                    <option value="IN">Indian Mobile (10-digit, starting 6-9)</option>
+                    <option value="US">US Phone (10-digit)</option>
+                    <option value="ALL">Generic / International (7-15 digits)</option>
+                  </select>
+                </div>
               </div>
+
+              {config.leadTriggerMode === 'intent_only' && (
+                <div className="pt-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Trigger Description / Instructions</label>
+                  <textarea
+                    value={config.leadTriggerPrompt}
+                    onChange={e => updateField('leadTriggerPrompt', e.target.value)}
+                    className="input-field min-h-[100px]"
+                    placeholder="e.g., When the customer expresses interest in hiring services, buying products, requesting a quote, pricing info, or scheduling a demo."
+                    rows={3}
+                    required
+                  />
+                </div>
+              )}
             </div>
 
             {/* Questions list */}
@@ -398,6 +469,88 @@ export default function LeadsConfig() {
                     )}
                   </div>
                 )}
+              </div>
+            </div>
+            {/* Lead Scoring Rules */}
+            <div className="card space-y-5">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-primary-600" />
+                <h3 className="text-lg font-semibold text-gray-900">Lead Scoring Rules</h3>
+              </div>
+              <p className="text-sm text-gray-500">
+                Define keywords and phrases that classify leads as <span className="font-semibold text-red-600">Hot</span>, <span className="font-semibold text-amber-600">Warm</span>, or <span className="font-semibold text-blue-600">Cold</span>. The AI uses these as scoring signals alongside full conversation context.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Hot */}
+                <div className="p-4 bg-red-50 border border-red-100 rounded-xl space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Flame className="w-4 h-4 text-red-500" />
+                    <span className="text-sm font-bold text-red-700">Hot Lead Keywords</span>
+                  </div>
+                  <p className="text-[11px] text-red-500">Signals high purchase intent — ready to buy or start immediately.</p>
+                  <textarea
+                    value={scoringRules.hotKeywords}
+                    onChange={e => setScoringRules(prev => ({ ...prev, hotKeywords: e.target.value }))}
+                    rows={4}
+                    className="w-full text-xs border border-red-200 rounded-lg p-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-red-300 resize-none"
+                    placeholder="urgent, buy now, hire, ready to start..."
+                  />
+                  <p className="text-[10px] text-red-400">Comma-separated list of words/phrases</p>
+                </div>
+
+                {/* Warm */}
+                <div className="p-4 bg-amber-50 border border-amber-100 rounded-xl space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Thermometer className="w-4 h-4 text-amber-500" />
+                    <span className="text-sm font-bold text-amber-700">Warm Lead Keywords</span>
+                  </div>
+                  <p className="text-[11px] text-amber-500">Signals moderate interest — exploring options, not yet committed.</p>
+                  <textarea
+                    value={scoringRules.warmKeywords}
+                    onChange={e => setScoringRules(prev => ({ ...prev, warmKeywords: e.target.value }))}
+                    rows={4}
+                    className="w-full text-xs border border-amber-200 rounded-lg p-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-amber-300 resize-none"
+                    placeholder="interested, looking for, considering..."
+                  />
+                  <p className="text-[10px] text-amber-400">Comma-separated list of words/phrases</p>
+                </div>
+
+                {/* Cold */}
+                <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Snowflake className="w-4 h-4 text-blue-500" />
+                    <span className="text-sm font-bold text-blue-700">Cold Lead Keywords</span>
+                  </div>
+                  <p className="text-[11px] text-blue-500">Signals low intent — browsing only or not ready to purchase.</p>
+                  <textarea
+                    value={scoringRules.coldKeywords}
+                    onChange={e => setScoringRules(prev => ({ ...prev, coldKeywords: e.target.value }))}
+                    rows={4}
+                    className="w-full text-xs border border-blue-200 rounded-lg p-2.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"
+                    placeholder="just browsing, no budget, not ready..."
+                  />
+                  <p className="text-[10px] text-blue-400">Comma-separated list of words/phrases</p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Additional Scoring Instructions (optional)</label>
+                <textarea
+                  value={scoringRules.additionalContext}
+                  onChange={e => setScoringRules(prev => ({ ...prev, additionalContext: e.target.value }))}
+                  rows={2}
+                  className="input-field text-sm"
+                  placeholder="e.g. Also consider leads hot if they mention a specific product SKU or mention a deadline date."
+                />
+                <p className="text-xs text-gray-400 mt-1">Free-form guidance passed to the AI scoring system for edge cases.</p>
+              </div>
+
+              <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl flex items-start gap-2.5">
+                <Check className="w-4 h-4 text-primary-500 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-gray-600">
+                  Lead scores (<span className="font-semibold text-red-600">Hot</span> / <span className="font-semibold text-amber-600">Warm</span> / <span className="font-semibold text-blue-600">Cold</span>) are shown in the Leads database, visible in the detail panel, and included in webhook payloads. Scoring runs automatically after each lead confirmation.
+                </p>
               </div>
             </div>
           </>

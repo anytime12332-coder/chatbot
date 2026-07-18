@@ -42,6 +42,11 @@ model Chatbot {
   leadQuestions         String  @default("[]") @db.Text // JSON list of questions
   webhookUrl            String  @default("") @db.Text
   leadStorageOption     String  @default("both") // "inbox", "separate", or "both"
+  leadTriggerMode       String  @default("intent_only") // "intent_only", "turn_threshold", "manual_only"
+  leadTurnThreshold     Int     @default(3)
+  leadPhoneFormat       String  @default("IN") // "IN", "US", "ALL"
+  widgetTheme           String  @default("{}") @db.Text // JSON configuration for widget appearance
+  leadScoringRules      String  @default("{}") @db.Text // JSON configuration for lead scoring rules
   leads                 Lead[]
 
   // RAG configurations
@@ -87,6 +92,8 @@ model Conversation {
   leadStatus           String @default("inactive") // "inactive", "collecting", "completed"
   currentQuestionIndex Int    @default(0)
   collectedData        String @default("{}") @db.Text // JSON string for collected fields
+  leadScore            String?
+  scoreReasoning       String? @db.Text
   lead                 Lead?
 
   @@index([sessionId])
@@ -115,6 +122,10 @@ model Lead {
   chatbotId      String
   conversationId String?       @unique
   details        String        @db.Text // JSON string of lead fields
+  status         String        @default("completed") // "completed", "incomplete"
+  isComplete     Boolean       @default(true)
+  leadScore      String?       // "hot", "warm", "cold"
+  scoreReasoning String?       @db.Text
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -131,6 +142,9 @@ model DocumentChunk {
   embedding     String   @db.Text // JSON stringified float array
   chunkIndex    Int      @default(0)
   sourceSection String?
+  sectionHeading String?
+  charStart     Int?
+  charEnd       Int?
   createdAt     DateTime @default(now())
 
   chatbot    Chatbot  @relation(fields: [chatbotId], references: [id], onDelete: Cascade)

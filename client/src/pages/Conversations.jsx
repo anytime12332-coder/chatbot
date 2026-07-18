@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { MessageSquare, ChevronLeft, User, Bot, Clock, Download, Users, Webhook, Check, ShieldAlert, Edit, Save, X, RefreshCw, Plus } from 'lucide-react';
+import { MessageSquare, ChevronLeft, User, Bot, Clock, Download, Users, Webhook, Check, ShieldAlert, Edit, Save, X, RefreshCw, Plus, Sparkles } from 'lucide-react';
 import api from '../lib/api';
 
 export default function Conversations() {
@@ -187,6 +187,9 @@ export default function Conversations() {
                       {conv.leadStatus === 'collecting' && (
                         <span className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-700 font-bold rounded-full">Collecting</span>
                       )}
+                      {conv.leadStatus === 'confirming' && (
+                        <span className="text-[10px] px-2 py-0.5 bg-yellow-100 text-yellow-700 font-bold rounded-full">Confirming</span>
+                      )}
                       <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${conv.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{conv.status}</span>
                     </div>
                   </div>
@@ -257,7 +260,7 @@ export default function Conversations() {
               </div>
 
               {/* Lead detail panel (right side) */}
-              <div className="w-80 flex-shrink-0 bg-gray-50/50 flex flex-col h-full border-l border-gray-100 overflow-y-auto p-4 space-y-4">
+              <div className="w-80 flex-shrink-0 bg-gray-50/50 flex flex-col h-full border-l border-l-gray-100 overflow-y-auto p-4 space-y-4">
                 <div className="flex items-center justify-between pb-3 border-b border-gray-200">
                   <h4 className="font-semibold text-gray-900 flex items-center gap-1.5 text-sm">
                     <Users className="w-4 h-4 text-indigo-600" /> Lead Information
@@ -367,17 +370,54 @@ export default function Conversations() {
                       </div>
                     )}
                   </div>
+                ) : (detail.leadStatus === 'collecting' || detail.leadStatus === 'confirming') ? (
+                  /* Display Progressive collection progress */
+                  <div className="space-y-4 w-full">
+                    <div className="bg-white p-4 border border-gray-200 rounded-xl space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] bg-blue-50 border border-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                          {detail.leadStatus === 'confirming' ? 'Confirming details...' : 'Qualifying...'}
+                        </span>
+                      </div>
+
+                      <div className="divide-y divide-gray-100 text-xs">
+                        {Object.entries(JSON.parse(detail.collectedData || '{}')).map(([key, val]) => (
+                          <div key={key} className="py-2 flex flex-col gap-0.5">
+                            <span className="text-[10px] font-medium text-gray-400 capitalize">{key.replace(/_/g, ' ')}</span>
+                            <span className="font-semibold text-gray-800 break-words">{String(val)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 ) : (
                   /* Empty state lead capture */
-                  <div className="flex-1 flex flex-col items-center justify-center text-center p-4 bg-white border border-dashed border-gray-200 rounded-xl h-48">
-                    <Users className="w-8 h-8 text-gray-300 mb-2" />
+                  <div className="flex-1 flex flex-col items-center justify-center text-center p-4 bg-white border border-dashed border-gray-200 rounded-xl h-64 gap-2 w-full">
+                    <Users className="w-8 h-8 text-gray-300 mb-1" />
                     <h5 className="font-semibold text-gray-700 text-xs">No lead data</h5>
-                    <p className="text-[10px] text-gray-400 mt-1 max-w-[160px]">This conversation has not been converted into a lead profile.</p>
+                    <p className="text-[10px] text-gray-400 max-w-[160px]">This conversation has not been qualified into a lead profile yet.</p>
+                    
+                    <button
+                      onClick={async () => {
+                        if (!window.confirm('Trigger lead qualification? The AI will start qualifying the user on their next turn.')) return;
+                        try {
+                          await api.post(`/chat/conversation/${detail.id}/trigger-lead`);
+                          loadDetail(detail.id);
+                        } catch (err) {
+                          alert('Failed to trigger lead qualification: ' + err.message);
+                        }
+                      }}
+                      className="mt-2 w-full text-xs bg-primary-50 text-primary-700 border border-primary-100 hover:bg-primary-100 py-2 px-3 rounded-lg font-semibold flex items-center justify-center gap-1.5"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" /> Start Qualification
+                    </button>
+
                     <button
                       onClick={() => setIsCreatingLead(true)}
-                      className="mt-3 text-xs bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-100 py-1.5 px-3 rounded-lg font-semibold flex items-center gap-1"
+                      className="w-full text-xs bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100 py-2 px-3 rounded-lg font-semibold flex items-center justify-center gap-1.5"
                     >
-                      <Plus className="w-3.5 h-3.5" /> Convert to Lead
+                      <Plus className="w-3.5 h-3.5" /> Convert Manually
                     </button>
                   </div>
                 )}

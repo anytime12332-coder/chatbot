@@ -199,17 +199,102 @@ STRICT RULES:
 }
 
 /**
- * Extracts a clean structured value from a user's raw answer.
+ * Local field validation helper
  */
-async function extractValue(message, questionLabel, questionPrompt, aiConfig) {
+function validateField(fieldId, value, phoneFormat = 'IN') {
+  const cleanVal = value.trim();
+  const idLower = String(fieldId || '').toLowerCase();
+  
+  if (idLower === 'email' || idLower.includes('email') || idLower.includes('mail')) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanVal)) {
+      return { is_valid: false, reason: 'invalid email pattern' };
+    }
+    const parts = cleanVal.split('@');
+    const domain = parts[1];
+    if (!domain.includes('.') || domain.endsWith('.')) {
+      return { is_valid: false, reason: 'invalid domain/TLD' };
+    }
+    return { is_valid: true };
+  }
+
+  if (idLower === 'phone' || idLower.includes('phone') || idLower.includes('mobile') || idLower.includes('contact')) {
+    const digits = cleanVal.replace(/\D/g, '');
+    if (phoneFormat === 'IN') {
+      const isValidIN = (digits.length === 10 && /^[6-9]\d{9}$/.test(digits)) || 
+                        (digits.length === 12 && /^91[6-9]\d{9}$/.test(digits));
+      if (!isValidIN) {
+        return { is_valid: false, reason: 'invalid Indian mobile format (must be 10 digits)' };
+      }
+    } else if (phoneFormat === 'US') {
+      const isValidUS = (digits.length === 10) || (digits.length === 11 && digits.startsWith('1'));
+      if (!isValidUS) {
+        return { is_valid: false, reason: 'invalid US phone format (must be 10 digits)' };
+      }
+    } else {
+      if (digits.length < 7 || digits.length > 15) {
+        return { is_valid: false, reason: 'invalid phone format (7 to 15 digits required)' };
+      }
+    }
+    return { is_valid: true };
+  }
+  if (cleanVal.length < 2) {
+    return { is_valid: false, reason: 'value too short' };
+  }
+
+  return { is_valid: true };
+}
+
+/**
+ * Extracts a clean structured value from a user's raw answer and scores the lead.
+ */
+async function extractValue(
+  message,
+  questionId,
+  questionLabel,
+  questionPrompt,
+  aiConfig,
+  phoneFormat = 'IN',
+  scoringRules = {},
+  history = [],
+  collectedData = {}
+) {
   try {
+    const recentHistory = history || [];
+    const dialogContext = recentHistory
+      .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+      .join('\n');
+    
+    const fullContext = dialogContext + `\nUser: ${message}`;
+    const rulesStr = JSON.stringify(scoringRules || {});
+    const collectedStr = JSON.stringify(collectedData || {});
+
     const extractionMessages = [
       {
         role: 'system',
-        content: `You are an AI that extracts information from user messages.
-Your task is to extract the answer for "${questionLabel}" from the user's response.
-Reply with ONLY the clean extracted value (e.g. just the email, name, or phone number).
-If the response doesn't contain a clear value, reply with the raw response. Do not add any explanation.`,
+        content: `You are an AI that extracts information from user messages and evaluates lead quality.
+
+Your FIRST task is to extract the answer for "${questionLabel}" from the user's latest response.
+If the response doesn't contain a clear value, reply with the raw response as the value.
+
+Your SECOND task is to evaluate the lead score ("hot", "warm", "cold") and provide a detailed reason why based on:
+1. The full conversation history:
+${fullContext}
+2. The current fields already collected:
+${collectedStr}
+3. The custom scoring rules configured by the administrator:
+${rulesStr}
+4. General indicators:
+- "hot": High buying intent, urgent timeline, budget mentioned or requested, or matches high-priority keywords from rules.
+- "warm": Expressed interest, asks about options, pricing, or features, but no urgent timeline or specific budget.
+- "cold": Just browsing, casual testing, or matches cold/spam keywords from rules.
+
+You MUST respond ONLY with a JSON object of this structure:
+{
+  "extracted_value": "extracted value or raw user response",
+  "lead_score": "hot" | "warm" | "cold",
+  "score_reasoning": "A concise explanation of why this score was given, referencing the matching keywords, timeline, or engagement depth."
+}`,
       },
       {
         role: 'user',
@@ -218,10 +303,132 @@ If the response doesn't contain a clear value, reply with the raw response. Do n
     ];
 
     const result = await getAIResponse(extractionMessages, aiConfig);
-    return result.content?.trim() || message;
+    
+    let extractedVal = message;
+    let leadScore = 'cold';
+    let scoreReasoning = 'Lead evaluated automatically.';
+
+    try {
+      const content = result.content?.trim() || '';
+      const startIdx = content.indexOf('{');
+      const endIdx = content.lastIndexOf('}');
+      if (startIdx !== -1 && endIdx !== -1) {
+        const jsonStr = content.slice(startIdx, endIdx + 1);
+        const parsed = JSON.parse(jsonStr);
+        extractedVal = parsed.extracted_value?.trim() || message;
+        leadScore = parsed.lead_score || 'cold';
+        scoreReasoning = parsed.score_reasoning || 'Evaluated automatically.';
+      } else {
+        extractedVal = content || message;
+      }
+    } catch (e) {
+      console.warn('Failed to parse JSON response in extractValue:', e.message);
+      extractedVal = result.content?.trim() || message;
+    }
+
+    const validation = validateField(questionId, extractedVal, phoneFormat);
+
+    if (!validation.is_valid) {
+      let botReply = `That doesn't look like a valid ${questionLabel} — mind double-checking it?`;
+      if (questionId === 'email' || questionId.toLowerCase().includes('email')) {
+        botReply = `That doesn't look like a valid email — mind double-checking it?`;
+      } else if (questionId === 'phone' || questionId.toLowerCase().includes('phone')) {
+        const desc = phoneFormat === 'IN' ? '10-digit Indian mobile number' : '10-digit phone number';
+        botReply = `That doesn't look like a valid phone number. Please provide a valid ${desc}.`;
+      }
+
+      return {
+        field_being_collected: questionId,
+        value_provided: extractedVal,
+        is_valid: false,
+        reason: validation.reason,
+        bot_reply: botReply,
+        lead_score: leadScore,
+        score_reasoning: scoreReasoning
+      };
+    }
+
+    return {
+      field_being_collected: questionId,
+      value_provided: extractedVal,
+      is_valid: true,
+      lead_score: leadScore,
+      score_reasoning: scoreReasoning
+    };
   } catch (err) {
     console.error('Value extraction failed:', err);
-    return message;
+    return {
+      field_being_collected: questionId,
+      value_provided: message,
+      is_valid: true,
+      lead_score: 'cold',
+      score_reasoning: 'Evaluation failed on server error.'
+    };
+  }
+}
+
+/**
+ * Detects if the user is attempting to correct a previously provided field
+ */
+async function classifyCorrection(message, collectedFields, aiConfig) {
+  try {
+    const prompt = `You are a conversation correction-detection engine.
+Your task is to identify if the user's message is a clear attempt to correct, change, or update a field that they have already provided.
+The fields they have provided so far: ${collectedFields.join(', ')}.
+
+STRICT RULES:
+1. If they want to correct one of these fields (e.g. "actually my email is...", "change my phone to..."), return a JSON object with:
+{
+  "is_correction": true,
+  "field": "name of the field being corrected (matching one of: ${collectedFields.join(', ')})"
+}
+2. If they are NOT correcting a field, return:
+{
+  "is_correction": false
+}
+3. Output ONLY a valid JSON object. No explanation, no markup (no \`\`\`json).`;
+
+    const messages = [
+      { role: 'system', content: prompt },
+      { role: 'user', content: `User message: "${message}"` }
+    ];
+
+    const res = await getAIResponse(messages, aiConfig);
+    let content = res.content?.trim() || '';
+    if (content.startsWith('```')) {
+      content = content.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    }
+    const parsed = JSON.parse(content);
+    if (parsed.is_correction && collectedFields.includes(parsed.field)) {
+      return parsed;
+    }
+  } catch (err) {
+    console.error('Correction classification error:', err.message);
+  }
+  return { is_correction: false };
+}
+
+/**
+ * Checks if the user is confirming the summary with a yes/agree
+ */
+async function classifyConfirmation(message, aiConfig) {
+  try {
+    const prompt = `Classify if the user is confirming or agreeing with the correctness of information (answering "yes", "looks good", "correct", etc.).
+Respond with ONLY the word YES if they are agreeing/confirming.
+Respond with ONLY the word NO if they are disagreeing, saying no, trying to correct something, or saying something else.
+Do not output anything else.`;
+
+    const messages = [
+      { role: 'system', content: prompt },
+      { role: 'user', content: `User message: "${message}"` }
+    ];
+
+    const res = await getAIResponse(messages, aiConfig);
+    const content = res.content?.trim().toUpperCase();
+    return content === 'YES';
+  } catch (err) {
+    console.error('Confirmation classification failed, using regex fallback:', err.message);
+    return /^(yes|yeah|yep|y|correct|sure|confirm|ok|okay|looks good|indeed)$/i.test(message.trim());
   }
 }
 
@@ -238,85 +445,166 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
     console.error('Failed to parse lead questions:', e);
   }
 
-  // ── CASE 1: Already in collection mode — process the user's answer ──
-  if (conversation.leadStatus === 'collecting') {
-    const currentQuestion = questions[conversation.currentQuestionIndex];
-    if (!currentQuestion) {
-      // Index out of bounds — mark completed and let normal chat continue
+  if (questions.length === 0) return false;
+
+  let collected = {};
+  try {
+    collected = JSON.parse(conversation.collectedData || '{}');
+  } catch (e) {}
+  const collectedFields = Object.keys(collected);
+
+  // Check for correction intent first (can happen during collecting or confirming)
+  if (collectedFields.length > 0 && conversation.leadStatus !== 'inactive') {
+    const correctionResult = await classifyCorrection(message.trim(), collectedFields, decryptedConfig);
+    if (correctionResult.is_correction) {
+      const fieldId = correctionResult.field;
+      const targetQIndex = questions.findIndex(q => (q.id === fieldId || q.label === fieldId));
+
+      if (targetQIndex !== -1) {
+        const targetQuestion = questions[targetQIndex];
+        // Try extracting value from the correction sentence
+        const extraction = await extractValue(
+          message.trim(),
+          targetQuestion.id,
+          targetQuestion.label,
+          targetQuestion.question,
+          decryptedConfig,
+          chatbot.leadPhoneFormat || 'IN',
+          chatbot.leadScoringRules ? JSON.parse(chatbot.leadScoringRules) : {},
+          history,
+          collected
+        );
+
+        if (extraction.is_valid) {
+          collected[targetQuestion.id || targetQuestion.label] = extraction.value_provided;
+          const newCollectedDataStr = JSON.stringify(collected);
+
+          // If all questions are answered, return to confirming state
+          const allAnswered = questions.every(q => collected[q.id || q.label] !== undefined);
+          if (allAnswered) {
+            await prisma.conversation.update({
+              where: { id: conversation.id },
+              data: {
+                leadStatus: 'confirming',
+                collectedData: newCollectedDataStr,
+                leadScore: extraction.lead_score,
+                scoreReasoning: extraction.score_reasoning,
+                updatedAt: new Date()
+              }
+            });
+
+            const summaryLines = Object.entries(collected)
+              .map(([k, v]) => `- **${k}**: ${v}`)
+              .join('\n');
+            const reply = `I've updated your ${targetQuestion.label} to "${extraction.value_provided}".\n\nHere is the updated information:\n${summaryLines}\n\nIs this correct? (Reply "yes" to confirm).`;
+
+            const assistantMessage = await prisma.message.create({
+              data: { role: 'assistant', content: reply, conversationId: conversation.id },
+            });
+
+            if (isStreaming) {
+              res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
+              res.write(`data: ${JSON.stringify({ type: 'chunk', content: reply })}\n\n`);
+              res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id })}\n\n`);
+              res.end();
+            } else {
+              res.json({ reply, sessionId: currentSessionId, messageId: assistantMessage.id, conversationId: conversation.id });
+            }
+            return true;
+          } else {
+            // Find next unanswered question
+            const nextUnansweredIdx = questions.findIndex(q => collected[q.id || q.label] === undefined);
+            await prisma.conversation.update({
+              where: { id: conversation.id },
+              data: {
+                leadStatus: 'collecting',
+                currentQuestionIndex: nextUnansweredIdx,
+                collectedData: newCollectedDataStr,
+                leadScore: extraction.lead_score,
+                scoreReasoning: extraction.score_reasoning,
+                updatedAt: new Date()
+              }
+            });
+
+            const nextQ = questions[nextUnansweredIdx];
+            const reply = `I've updated your ${targetQuestion.label} to "${extraction.value_provided}".\n\nNext: ${nextQ.question}`;
+            const assistantMessage = await prisma.message.create({
+              data: { role: 'assistant', content: reply, conversationId: conversation.id },
+            });
+
+            if (isStreaming) {
+              res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
+              res.write(`data: ${JSON.stringify({ type: 'chunk', content: reply })}\n\n`);
+              res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id })}\n\n`);
+              res.end();
+            } else {
+              res.json({ reply, sessionId: currentSessionId, messageId: assistantMessage.id, conversationId: conversation.id });
+            }
+            return true;
+          }
+        } else {
+          // Remove field and ask for it specifically
+          delete collected[targetQuestion.id || targetQuestion.label];
+          await prisma.conversation.update({
+            where: { id: conversation.id },
+            data: {
+              leadStatus: 'collecting',
+              currentQuestionIndex: targetQIndex,
+              collectedData: JSON.stringify(collected),
+              updatedAt: new Date()
+            }
+          });
+
+          const reply = `Understood. Let's correct your ${targetQuestion.label}.\n\n${targetQuestion.question}`;
+          const assistantMessage = await prisma.message.create({
+            data: { role: 'assistant', content: reply, conversationId: conversation.id },
+          });
+
+          if (isStreaming) {
+            res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'chunk', content: reply })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id })}\n\n`);
+            res.end();
+          } else {
+            res.json({ reply, sessionId: currentSessionId, messageId: assistantMessage.id, conversationId: conversation.id });
+          }
+          return true;
+        }
+      }
+    }
+  }
+
+  // ── CASE 1: Confirming State — handle yes/no confirmation ──
+  if (conversation.leadStatus === 'confirming') {
+    const isConfirmed = await classifyConfirmation(message.trim(), decryptedConfig);
+    if (isConfirmed) {
+      // Finalize and create the Lead row
       await prisma.conversation.update({
         where: { id: conversation.id },
         data: { leadStatus: 'completed', updatedAt: new Date() },
       });
-      return false;
-    }
 
-    // Extract the value from the user's answer using LLM
-    const extractedVal = await extractValue(
-      message.trim(),
-      currentQuestion.label,
-      currentQuestion.question,
-      decryptedConfig
-    );
-
-    let collected = {};
-    try { collected = JSON.parse(conversation.collectedData || '{}'); } catch (e) {}
-    collected[currentQuestion.id || currentQuestion.label] = extractedVal;
-    const collectedDataStr = JSON.stringify(collected);
-
-    const nextIndex = conversation.currentQuestionIndex + 1;
-
-    if (nextIndex < questions.length) {
-      // ── More questions remain — save progress and ask next question ──
-      await prisma.conversation.update({
-        where: { id: conversation.id },
-        data: {
-          currentQuestionIndex: nextIndex,
-          collectedData: collectedDataStr,
-          updatedAt: new Date(),
+      const collectedDataStr = JSON.stringify(collected);
+      const lead = await prisma.lead.upsert({
+        where: { conversationId: conversation.id },
+        update: {
+          details: collectedDataStr,
+          status: 'completed',
+          isComplete: true,
+          leadScore: conversation.leadScore || 'cold',
+          scoreReasoning: conversation.scoreReasoning || 'Lead confirmed details.'
+        },
+        create: {
+          chatbotId: chatbot.id,
+          conversationId: conversation.id,
+          details: collectedDataStr,
+          status: 'completed',
+          isComplete: true,
+          leadScore: conversation.leadScore || 'cold',
+          scoreReasoning: conversation.scoreReasoning || 'Lead confirmed details.'
         },
       });
 
-      // Upsert Lead row progressively so partial data is never lost
-      await prisma.lead.upsert({
-        where: { conversationId: conversation.id },
-        update: { details: collectedDataStr },
-        create: { chatbotId: chatbot.id, conversationId: conversation.id, details: collectedDataStr },
-      });
-
-      const nextQuestion = questions[nextIndex];
-      const assistantMessage = await prisma.message.create({
-        data: { role: 'assistant', content: nextQuestion.question, conversationId: conversation.id },
-      });
-
-      if (isStreaming) {
-        res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
-        res.write(`data: ${JSON.stringify({ type: 'chunk', content: nextQuestion.question })}\n\n`);
-        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id, tokenCount: 0, responseTimeMs: 0 })}\n\n`);
-        res.end();
-      } else {
-        res.json({
-          reply: nextQuestion.question,
-          sessionId: currentSessionId,
-          messageId: assistantMessage.id,
-          conversationId: conversation.id,
-        });
-      }
-      return true;
-
-    } else {
-      // ── All questions answered — finalize lead ──
-      await prisma.conversation.update({
-        where: { id: conversation.id },
-        data: { leadStatus: 'completed', collectedData: collectedDataStr, updatedAt: new Date() },
-      });
-
-      const lead = await prisma.lead.upsert({
-        where: { conversationId: conversation.id },
-        update: { details: collectedDataStr },
-        create: { chatbotId: chatbot.id, conversationId: conversation.id, details: collectedDataStr },
-      });
-
-      // Fire webhook (async, with retry — don't block user response)
       if (chatbot.webhookUrl) {
         triggerWebhook(chatbot.webhookUrl, {
           event: 'lead.captured',
@@ -329,57 +617,170 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
         }).catch(err => console.error('Webhook fire error:', err));
       }
 
-      // Thank the user with a natural AI-generated response
-      const finalPrompt = [
+      const thankYouPrompt = [
         {
           role: 'system',
-          content: `The lead collection is complete. Here are the details collected:\n${Object.entries(collected).map(([k, v]) => `- ${k}: ${v}`).join('\n')}\n\nPolitely thank the user for providing their details and let them know we will get back to them. If they have any other questions, they can ask.`,
+          content: `The lead collection is complete and confirmed. Politely thank the user for providing their details and let them know we will get back to them. If they have any other questions, they can ask.`,
         },
         { role: 'user', content: message.trim() },
       ];
 
       if (isStreaming) {
-        res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
-
         const startTime = Date.now();
         let fullContent = '';
         const aiResult = await aiQueue.add(() =>
-          getAIResponseStreaming(finalPrompt, decryptedConfig, (chunk) => {
+          getAIResponseStreaming(thankYouPrompt, decryptedConfig, (chunk) => {
             fullContent += chunk;
             res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
           })
         );
         const responseTimeMs = Date.now() - startTime;
-
         const assistantMessage = await prisma.message.create({
-          data: {
-            role: 'assistant',
-            content: aiResult.content || fullContent,
-            tokenCount: aiResult.tokenCount || 0,
-            responseTimeMs,
-            conversationId: conversation.id,
-          },
+          data: { role: 'assistant', content: aiResult.content || fullContent, tokenCount: aiResult.tokenCount || 0, responseTimeMs, conversationId: conversation.id },
         });
-
         res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id, tokenCount: aiResult.tokenCount || 0, responseTimeMs })}\n\n`);
         res.end();
       } else {
         const startTime = Date.now();
-        const aiResult = await aiQueue.add(() => getAIResponse(finalPrompt, decryptedConfig));
+        const aiResult = await aiQueue.add(() => getAIResponse(thankYouPrompt, decryptedConfig));
         const responseTimeMs = Date.now() - startTime;
-
         const assistantMessage = await prisma.message.create({
-          data: {
-            role: 'assistant',
-            content: aiResult.content,
-            tokenCount: aiResult.tokenCount,
-            responseTimeMs,
-            conversationId: conversation.id,
-          },
+          data: { role: 'assistant', content: aiResult.content, tokenCount: aiResult.tokenCount, responseTimeMs, conversationId: conversation.id },
         });
+        res.json({ reply: aiResult.content, sessionId: currentSessionId, messageId: assistantMessage.id, conversationId: conversation.id });
+      }
+      return true;
+    } else {
+      // Did not confirm
+      const reply = `I didn't quite catch that. Is the information listed above correct? Please reply "yes" to confirm, or tell me which field you would like to correct.`;
+      const assistantMessage = await prisma.message.create({
+        data: { role: 'assistant', content: reply, conversationId: conversation.id },
+      });
 
+      if (isStreaming) {
+        res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'chunk', content: reply })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id })}\n\n`);
+        res.end();
+      } else {
+        res.json({ reply, sessionId: currentSessionId, messageId: assistantMessage.id, conversationId: conversation.id });
+      }
+      return true;
+    }
+  }
+
+  // ── CASE 2: Collecting State — process the answer for the current question ──
+  if (conversation.leadStatus === 'collecting') {
+    const currentQuestion = questions[conversation.currentQuestionIndex];
+    if (!currentQuestion) {
+      await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { leadStatus: 'confirming', updatedAt: new Date() },
+      });
+      return false;
+    }
+
+    const extractionResult = await extractValue(
+      message.trim(),
+      currentQuestion.id,
+      currentQuestion.label,
+      currentQuestion.question,
+      decryptedConfig,
+      chatbot.leadPhoneFormat || 'IN',
+      chatbot.leadScoringRules ? JSON.parse(chatbot.leadScoringRules) : {},
+      history,
+      collected
+    );
+
+    if (!extractionResult.is_valid) {
+      // Re-ask the same question without advancing index or saving
+      const assistantMessage = await prisma.message.create({
+        data: { role: 'assistant', content: extractionResult.bot_reply, conversationId: conversation.id },
+      });
+
+      if (isStreaming) {
+        res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'chunk', content: extractionResult.bot_reply })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id })}\n\n`);
+        res.end();
+      } else {
         res.json({
-          reply: aiResult.content,
+          reply: extractionResult.bot_reply,
+          sessionId: currentSessionId,
+          messageId: assistantMessage.id,
+          conversationId: conversation.id,
+        });
+      }
+      return true;
+    }
+
+    // Valid extraction: save to collectedData
+    collected[currentQuestion.id || currentQuestion.label] = extractionResult.value_provided;
+    const collectedDataStr = JSON.stringify(collected);
+    const nextIndex = conversation.currentQuestionIndex + 1;
+
+    if (nextIndex < questions.length) {
+      // Ask next question
+      await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          currentQuestionIndex: nextIndex,
+          collectedData: collectedDataStr,
+          leadScore: extractionResult.lead_score,
+          scoreReasoning: extractionResult.score_reasoning,
+          updatedAt: new Date(),
+        },
+      });
+
+      const nextQuestion = questions[nextIndex];
+      const assistantMessage = await prisma.message.create({
+        data: { role: 'assistant', content: nextQuestion.question, conversationId: conversation.id },
+      });
+
+      if (isStreaming) {
+        res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'chunk', content: nextQuestion.question })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id })}\n\n`);
+        res.end();
+      } else {
+        res.json({
+          reply: nextQuestion.question,
+          sessionId: currentSessionId,
+          messageId: assistantMessage.id,
+          conversationId: conversation.id,
+        });
+      }
+      return true;
+    } else {
+      // All questions answered -> transition to confirming state (NO lead row created yet!)
+      await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          leadStatus: 'confirming',
+          collectedData: collectedDataStr,
+          leadScore: extractionResult.lead_score,
+          scoreReasoning: extractionResult.score_reasoning,
+          updatedAt: new Date(),
+        },
+      });
+
+      const summaryLines = Object.entries(collected)
+        .map(([k, v]) => `- **${k}**: ${v}`)
+        .join('\n');
+      const confirmMsg = `Thanks! Here is the information I've collected:\n\n${summaryLines}\n\nIs this correct? (Reply "yes" to confirm).`;
+
+      const assistantMessage = await prisma.message.create({
+        data: { role: 'assistant', content: confirmMsg, conversationId: conversation.id },
+      });
+
+      if (isStreaming) {
+        res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'chunk', content: confirmMsg })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id })}\n\n`);
+        res.end();
+      } else {
+        res.json({
+          reply: confirmMsg,
           sessionId: currentSessionId,
           messageId: assistantMessage.id,
           conversationId: conversation.id,
@@ -389,19 +790,32 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
     }
   }
 
-  // ── CASE 2: Not collecting — check if this message should trigger lead capture ──
-  if (conversation.leadStatus === 'inactive' && chatbot.leadCollectionEnabled && questions.length > 0) {
-    const isLeadIntent = await classifyIntent(
-      message.trim(),
-      chatbot.leadTriggerPrompt,
-      history,          // Pass full conversation history for context
-      decryptedConfig
-    );
+  // ── CASE 3: Inactive State — check trigger conditions ──
+  if (conversation.leadStatus === 'inactive' && chatbot.leadCollectionEnabled) {
+    let shouldTrigger = false;
+    const mode = chatbot.leadTriggerMode || 'intent_only';
 
-    if (isLeadIntent) {
+    if (mode === 'turn_threshold') {
+      const userMessageCount = history.filter(m => m.role === 'user').length + 1; // Include current message
+      if (userMessageCount >= (chatbot.leadTurnThreshold || 3)) {
+        shouldTrigger = true;
+      }
+    } else if (mode === 'intent_only') {
+      const isLeadIntent = await classifyIntent(
+        message.trim(),
+        chatbot.leadTriggerPrompt,
+        history,
+        decryptedConfig
+      );
+      if (isLeadIntent) {
+        shouldTrigger = true;
+      }
+    }
+
+    if (shouldTrigger) {
       await prisma.conversation.update({
         where: { id: conversation.id },
-        data: { leadStatus: 'collecting', currentQuestionIndex: 0, updatedAt: new Date() },
+        data: { leadStatus: 'collecting', currentQuestionIndex: 0, collectedData: '{}', updatedAt: new Date() },
       });
 
       const firstQuestion = questions[0];
@@ -412,7 +826,7 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
       if (isStreaming) {
         res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
         res.write(`data: ${JSON.stringify({ type: 'chunk', content: firstQuestion.question })}\n\n`);
-        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id, tokenCount: 0, responseTimeMs: 0 })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id })}\n\n`);
         res.end();
       } else {
         res.json({
@@ -628,5 +1042,111 @@ router.get('/conversation/:id', authMiddleware, async (req, res) => {
     res.status(500).json({ error: 'Failed to get conversation' });
   }
 });
+
+// POST /api/chat/conversation/:id/trigger-lead - Manually trigger lead qualification (from Conversations list)
+router.post('/conversation/:id/trigger-lead', authMiddleware, async (req, res) => {
+  try {
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: req.params.id },
+      include: { chatbot: true }
+    });
+
+    if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
+    if (conversation.chatbot.adminId !== req.admin.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    let questions = [];
+    try {
+      questions = JSON.parse(conversation.chatbot.leadQuestions || '[]');
+    } catch (e) {}
+
+    if (questions.length === 0) {
+      return res.status(400).json({ error: 'No lead questions configured for this chatbot' });
+    }
+
+    // Force lead status to collecting, and set question index to 0
+    const updatedConv = await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: {
+        leadStatus: 'collecting',
+        currentQuestionIndex: 0,
+        collectedData: '{}',
+        updatedAt: new Date()
+      }
+    });
+
+    // Create the assistant message with the first question
+    const firstQ = questions[0];
+    const assistantMessage = await prisma.message.create({
+      data: { role: 'assistant', content: firstQ.question, conversationId: conversation.id }
+    });
+
+    res.json({
+      message: 'Lead collection triggered successfully',
+      conversation: updatedConv,
+      firstQuestion: firstQ.question,
+      messageId: assistantMessage.id
+    });
+  } catch (error) {
+    console.error('Trigger lead capture error:', error);
+    res.status(500).json({ error: 'Failed to trigger lead capture' });
+  }
+});
+
+// Background job to clean up abandoned sessions and save incomplete leads
+setInterval(async () => {
+  try {
+    const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutes
+    const threshold = new Date(Date.now() - INACTIVITY_TIMEOUT);
+
+    const abandonedConversations = await prisma.conversation.findMany({
+      where: {
+        leadStatus: { in: ['collecting', 'confirming'] },
+        updatedAt: { lt: threshold }
+      },
+      include: {
+        lead: true
+      }
+    });
+
+    for (const conv of abandonedConversations) {
+      let collected = {};
+      try {
+        collected = JSON.parse(conv.collectedData || '{}');
+      } catch (e) {}
+
+      // Only create an incomplete lead if some fields have been collected
+      if (Object.keys(collected).length > 0) {
+        await prisma.lead.upsert({
+          where: { conversationId: conv.id },
+          update: {
+            details: conv.collectedData,
+            status: 'incomplete'
+          },
+          create: {
+            chatbotId: conv.chatbotId,
+            conversationId: conv.id,
+            details: conv.collectedData,
+            status: 'incomplete'
+          }
+        });
+      }
+
+      // Update conversation state to completed (since we've processed it)
+      await prisma.conversation.update({
+        where: { id: conv.id },
+        data: {
+          leadStatus: 'completed',
+          updatedAt: new Date()
+        }
+      });
+
+      console.log(`[Auto-Lead] Captured incomplete lead for conversation ${conv.id} due to inactivity.`);
+    }
+  } catch (err) {
+    console.error('[Auto-Lead] Background job failed:', err);
+  }
+}, 60 * 1000); // Check every minute
 
 module.exports = router;

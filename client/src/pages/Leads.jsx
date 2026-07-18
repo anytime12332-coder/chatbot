@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Users, Search, Download, Trash2, Settings, MessageSquare, ExternalLink, Calendar, Mail, Phone, Webhook, X, RefreshCw } from 'lucide-react';
+import { Users, Search, Download, Trash2, Settings, MessageSquare, ExternalLink, Calendar, Mail, Phone, Webhook, X, RefreshCw, Flame, Thermometer, Snowflake } from 'lucide-react';
 import api from '../lib/api';
 
 export default function Leads() {
@@ -97,6 +97,25 @@ export default function Leads() {
       if (foundKey) return details[foundKey];
     }
     return '';
+  }
+
+  // Render score badge
+  function ScoreBadge({ score, showLabel = true }) {
+    if (!score) return <span className="text-gray-300 text-xs">—</span>;
+    const map = {
+      hot:  { label: 'Hot',  Icon: Flame,       cls: 'bg-red-100 text-red-700 border-red-200' },
+      warm: { label: 'Warm', Icon: Thermometer,  cls: 'bg-amber-100 text-amber-700 border-amber-200' },
+      cold: { label: 'Cold', Icon: Snowflake,    cls: 'bg-blue-100 text-blue-700 border-blue-200' },
+    };
+    const entry = map[score.toLowerCase()];
+    if (!entry) return null;
+    const { label, Icon, cls } = entry;
+    return (
+      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${cls}`}>
+        <Icon className="w-3 h-3" />
+        {showLabel && label}
+      </span>
+    );
   }
 
   // Export leads to CSV
@@ -235,13 +254,15 @@ export default function Leads() {
             ) : (
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="p-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">Date</th>
-                    <th className="p-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">Name</th>
-                    <th className="p-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">Email</th>
-                    <th className="p-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">Phone</th>
-                    <th className="p-4 text-xs font-semibold text-gray-400 uppercase tracking-wider text-right">Actions</th>
-                  </tr>
+                   <tr className="bg-gray-50 border-b border-gray-200">
+                     <th className="p-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">Date</th>
+                     <th className="p-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">Name</th>
+                     <th className="p-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">Email</th>
+                     <th className="p-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">Phone</th>
+                     <th className="p-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">Score</th>
+                     <th className="p-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">Status</th>
+                     <th className="p-4 text-xs font-semibold text-gray-400 uppercase tracking-wider text-right">Actions</th>
+                   </tr>
                 </thead>
                 <tbody>
                   {leads.map(lead => {
@@ -267,6 +288,14 @@ export default function Leads() {
                         </td>
                         <td className="p-4 text-sm text-gray-500 whitespace-nowrap">
                           {phone || <span className="text-gray-300">-</span>}
+                        </td>
+                        <td className="p-4 text-sm whitespace-nowrap">
+                          <ScoreBadge score={lead.leadScore} />
+                        </td>
+                        <td className="p-4 text-sm whitespace-nowrap">
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${lead.status === 'incomplete' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                            {lead.status === 'incomplete' ? 'Incomplete' : 'Complete'}
+                          </span>
                         </td>
                         <td className="p-4 text-sm text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1.5">
@@ -321,15 +350,29 @@ export default function Leads() {
             <div className="flex-1 overflow-y-auto p-4 space-y-5">
               {/* Profile Card */}
               <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-3">
-                <div className="w-12 h-12 bg-primary-100 rounded-full flex items-center justify-center">
-                  <span className="text-base font-bold text-primary-700">
-                    {(selectedLead.conversation?.visitorName?.[0] || 'V').toUpperCase()}
-                  </span>
+                <div className="flex justify-between items-start">
+                  <div className="w-12 h-12 bg-primary-100 rounded-full flex items-center justify-center">
+                    <span className="text-base font-bold text-primary-700">
+                      {(selectedLead.conversation?.visitorName?.[0] || 'V').toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="flex flex-col items-end gap-1.5">
+                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${selectedLead.status === 'incomplete' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                      {selectedLead.status === 'incomplete' ? 'Incomplete' : 'Complete'}
+                    </span>
+                    <ScoreBadge score={selectedLead.leadScore} />
+                  </div>
                 </div>
                 <div>
                   <h4 className="font-bold text-gray-900 text-base">{selectedLead.conversation?.visitorName || 'Visitor'}</h4>
                   <p className="text-xs text-gray-400 mt-0.5">Lead ID: {selectedLead.id.slice(0, 8)}...</p>
                 </div>
+                {selectedLead.scoreReasoning && (
+                  <div className="pt-2 border-t border-gray-100">
+                    <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1">Score Reasoning</p>
+                    <p className="text-xs text-gray-600 leading-relaxed">{selectedLead.scoreReasoning}</p>
+                  </div>
+                )}
               </div>
 
               {/* Data Table */}

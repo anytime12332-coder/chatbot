@@ -47,7 +47,8 @@ router.post('/', async (req, res) => {
   try {
     const {
       name, businessName, businessInfo, systemPrompt, welcomeMessage, primaryColor, position,
-      leadCollectionEnabled, leadTriggerPrompt, leadQuestions, webhookUrl, leadStorageOption
+      leadCollectionEnabled, leadTriggerPrompt, leadQuestions, webhookUrl, leadStorageOption,
+      leadTriggerMode, leadTurnThreshold, leadPhoneFormat, widgetTheme, leadScoringRules
     } = req.body;
 
     const chatbot = await prisma.chatbot.create({
@@ -65,6 +66,11 @@ router.post('/', async (req, res) => {
         leadQuestions: leadQuestions || '[]',
         webhookUrl: webhookUrl || '',
         leadStorageOption: leadStorageOption || 'both',
+        leadTriggerMode: leadTriggerMode || 'intent_only',
+        leadTurnThreshold: leadTurnThreshold !== undefined ? parseInt(leadTurnThreshold) : 3,
+        leadPhoneFormat: leadPhoneFormat || 'IN',
+        widgetTheme: widgetTheme || '{}',
+        leadScoringRules: leadScoringRules || '{}',
         apiConfig: {
           create: {
             provider: 'openai',
@@ -121,6 +127,7 @@ router.put('/:id', async (req, res) => {
     const {
       name, businessName, businessInfo, systemPrompt, welcomeMessage, primaryColor, position, isActive,
       leadCollectionEnabled, leadTriggerPrompt, leadQuestions, webhookUrl, leadStorageOption,
+      leadTriggerMode, leadTurnThreshold, leadPhoneFormat, widgetTheme, leadScoringRules,
       ragEnabled, ragProvider, ragApiKey, ragModel
     } = req.body;
 
@@ -140,6 +147,11 @@ router.put('/:id', async (req, res) => {
         ...(leadQuestions !== undefined && { leadQuestions }),
         ...(webhookUrl !== undefined && { webhookUrl }),
         ...(leadStorageOption !== undefined && { leadStorageOption }),
+        ...(leadTriggerMode !== undefined && { leadTriggerMode }),
+        ...(leadTurnThreshold !== undefined && { leadTurnThreshold: parseInt(leadTurnThreshold) }),
+        ...(leadPhoneFormat !== undefined && { leadPhoneFormat }),
+        ...(widgetTheme !== undefined && { widgetTheme }),
+        ...(leadScoringRules !== undefined && { leadScoringRules }),
         ...(ragEnabled !== undefined && { ragEnabled }),
         ...(ragProvider !== undefined && { ragProvider }),
         ...(ragApiKey !== undefined && { ragApiKey: ragApiKey.includes('****') ? existing.ragApiKey : encrypt(ragApiKey) }),
@@ -156,11 +168,11 @@ router.put('/:id', async (req, res) => {
       
       if (chunks.length > 0) {
         await prisma.documentChunk.deleteMany({ where: { chatbotId: chatbot.id } });
-        for (const chunk of chunks) {
+        for (const chunkObj of chunks) {
           let embeddingStr = '[]';
           if (decryptedKey) {
             try {
-              const embeddingVector = await generateEmbedding(chunk, chatbot.ragProvider, decryptedKey, chatbot.ragModel);
+              const embeddingVector = await generateEmbedding(chunkObj.content, chatbot.ragProvider, decryptedKey, chatbot.ragModel);
               embeddingStr = JSON.stringify(embeddingVector);
             } catch (e) {
               console.warn(`Auto-embedding generation failed in chatbot update: ${e.message}`);
@@ -169,8 +181,12 @@ router.put('/:id', async (req, res) => {
           await prisma.documentChunk.create({
             data: {
               chatbotId: chatbot.id,
-              content: chunk,
-              embedding: embeddingStr
+              content: chunkObj.content,
+              embedding: embeddingStr,
+              chunkIndex: chunkObj.chunkIndex,
+              sectionHeading: chunkObj.sectionHeading,
+              charStart: chunkObj.charStart,
+              charEnd: chunkObj.charEnd
             }
           });
         }

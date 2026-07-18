@@ -121,7 +121,10 @@ router.post('/:botId/rebuild', async (req, res) => {
           chatbotId: botId,
           content: chunkObj.content,
           embedding: embeddingStr,
-          chunkIndex: chunkObj.chunkIndex
+          chunkIndex: chunkObj.chunkIndex,
+          sectionHeading: chunkObj.sectionHeading,
+          charStart: chunkObj.charStart,
+          charEnd: chunkObj.charEnd
         }
       });
       savedChunks.push(newChunk);
@@ -192,7 +195,10 @@ router.put('/:botId', async (req, res) => {
               chatbotId: botId,
               content: chunkObj.content,
               embedding: embeddingStr,
-              chunkIndex: chunkObj.chunkIndex
+              chunkIndex: chunkObj.chunkIndex,
+              sectionHeading: chunkObj.sectionHeading,
+              charStart: chunkObj.charStart,
+              charEnd: chunkObj.charEnd
             }
           });
         }
@@ -214,6 +220,36 @@ router.put('/:botId', async (req, res) => {
   } catch (error) {
     console.error('Update RAG config error:', error);
     res.status(500).json({ error: 'Failed to update RAG configuration' });
+  }
+});
+
+// GET /api/rag/chunks/:botId - Get raw chunks for inspection
+router.get('/chunks/:botId', async (req, res) => {
+  try {
+    const { botId } = req.params;
+    const chatbot = await prisma.chatbot.findFirst({
+      where: { id: botId, adminId: req.admin.id }
+    });
+    if (!chatbot) return res.status(404).json({ error: 'Chatbot not found' });
+
+    const chunks = await prisma.documentChunk.findMany({
+      where: { chatbotId: botId },
+      orderBy: { chunkIndex: 'asc' },
+      select: {
+        id: true,
+        chunkIndex: true,
+        content: true,
+        sectionHeading: true,
+        charStart: true,
+        charEnd: true,
+        createdAt: true
+      }
+    });
+
+    res.json(chunks);
+  } catch (error) {
+    console.error('Get chunks error:', error);
+    res.status(500).json({ error: 'Failed to retrieve chunks' });
   }
 });
 

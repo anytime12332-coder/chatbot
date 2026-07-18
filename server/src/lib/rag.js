@@ -2,73 +2,181 @@ const https = require('https');
 const http = require('http');
 const prisma = require('./prisma');
 const { decrypt } = require('./encryption');
+const { getAIResponse } = require('./aiProviders');
+const { getEncoding } = require('js-tiktoken');
+const enc = getEncoding("cl100k_base");
+
+/**
+ * Split a text into sentences, handling abbreviations and decimals.
+ */
+function splitSentences(text) {
+  if (!text) return [];
+  const sentences = [];
+  let currentSentence = [];
+  const tokens = text.split(/(\s+)/);
+  
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (!token) continue;
+    currentSentence.push(token);
+    
+    if (/[.!?]$/.test(token.trim())) {
+      const word = token.trim();
+      const isAbbreviation = /\b(?:Mr|Dr|Ms|Co|Inc|Ltd|Jr|Sr|vs|eg|ie|etc|e\.g|i\.e|a\.m|p\.m)\.$/i.test(word);
+      
+      let isDecimal = false;
+      if (/\b\d+\.$/.test(word)) {
+        let nextWord = '';
+        for (let j = i + 1; j < tokens.length; j++) {
+          if (tokens[j].trim()) {
+            nextWord = tokens[j].trim();
+            break;
+          }
+        }
+        if (/^\d+/.test(nextWord)) {
+          isDecimal = true;
+        }
+      }
+      
+      if (!isAbbreviation && !isDecimal) {
+        sentences.push(currentSentence.join(''));
+        currentSentence = [];
+      }
+    }
+  }
+  if (currentSentence.length > 0) {
+    sentences.push(currentSentence.join(''));
+  }
+  
+  return sentences.map(s => s.trim()).filter(Boolean);
+}
 
 /**
  * Split text into overlapping chunks, preserving paragraphs and formatting.
+ * Change sizing from character-based to token-based: target 300-500 tokens/chunk.
  */
-function splitTextIntoChunks(text, chunkSize = 1200, overlap = 200) {
+function splitTextIntoChunks(text, targetTokens = 400) {
   if (!text || !text.trim()) return [];
 
-  // Step 1: Normalize spacing without destroying newlines (don't collapse all vertical whitespace to single spaces)
+  // Step 1: Normalize vertical spacing and horizontal spacing
   const normalized = text
     .replace(/\r\n/g, '\n')
-    .replace(/[ \t]+/g, ' ') // Collapse multiple spaces or tabs
-    .replace(/\n{3,}/g, '\n\n') // Limit maximum sequential paragraph breaks to 2
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 
-  // Step 2: Split on paragraph breaks first to maintain cohesive topics
   const paragraphs = normalized.split(/\n\n+/);
   const chunks = [];
-  let currentChunkText = '';
   let chunkIndex = 0;
-
-  for (const para of paragraphs) {
-    const paraText = para.trim();
-    if (!paraText) continue;
-
-    // If adding this paragraph exceeds chunkSize, finalize current chunk
-    if (currentChunkText && (currentChunkText.length + paraText.length + 2) > chunkSize) {
-      chunks.push({
-        content: currentChunkText.trim(),
-        chunkIndex: chunkIndex++
-      });
-
-      // Implement semantic overlap: carry over the last line or trailing sentence structure if possible
-      const lines = currentChunkText.split('\n');
-      const carryOverLines = lines.slice(-2).join('\n');
-      currentChunkText = carryOverLines ? carryOverLines + '\n\n' + paraText : paraText;
-    } else {
-      currentChunkText = currentChunkText ? currentChunkText + '\n\n' + paraText : paraText;
+  
+  let currentChunkSentences = [];
+  let currentChunkTokens = 0;
+  let currentHeading = null;
+  let searchOffset = 0;
+  
+  for (let i = 0; i < paragraphs.length; i++) {
+    const para = paragraphs[i].trim();
+    if (!para) continue;
+    
+    // Heading detection heuristic:
+    const isHeading = para.startsWith('#') || (para.length < 100 && !para.includes('\n') && !/[.!?]$/.test(para));
+    if (isHeading) {
+      currentHeading = para.replace(/^#+\s*/, '').trim();
     }
-
-    // Handle edge case where a single paragraph is too large (split it by sentences)
-    if (currentChunkText.length > chunkSize * 1.5) {
-      const sentences = currentChunkText.match(/[^.!?]+[.!?]+(\s|$)/g) || [currentChunkText];
-      let sentenceChunk = '';
-      for (const sentence of sentences) {
-        if (sentenceChunk && (sentenceChunk.length + sentence.length) > chunkSize) {
+    
+    const sentences = splitSentences(para);
+    
+    for (const sentence of sentences) {
+      const sentenceTokens = enc.encode(sentence).length;
+      
+      // Giant sentence fallback
+      if (sentenceTokens > 500) {
+        if (currentChunkSentences.length > 0) {
+          const chunkText = currentChunkSentences.join(' ');
+          const charStart = normalized.indexOf(chunkText, searchOffset);
+          let charEnd = null;
+          if (charStart !== -1) {
+            charEnd = charStart + chunkText.length;
+            searchOffset = charStart + 1;
+          }
           chunks.push({
-            content: sentenceChunk.trim(),
-            chunkIndex: chunkIndex++
+            content: chunkText,
+            chunkIndex: chunkIndex++,
+            sectionHeading: currentHeading,
+            charStart: charStart !== -1 ? charStart : null,
+            charEnd: charStart !== -1 ? charEnd : null
           });
-          // Carry over the last sentence for context overlap
-          sentenceChunk = sentenceChunk.split(/[.!?]+/).slice(-2).join('. ') + '. ' + sentence;
-        } else {
-          sentenceChunk = sentenceChunk ? sentenceChunk + ' ' + sentence : sentence;
+          currentChunkSentences = [];
+          currentChunkTokens = 0;
         }
+        
+        // Split by raw character size as last resort
+        let pos = 0;
+        while (pos < sentence.length) {
+          const chunkText = sentence.substring(pos, pos + 1200);
+          const charStart = normalized.indexOf(chunkText, searchOffset);
+          let charEnd = null;
+          if (charStart !== -1) {
+            charEnd = charStart + chunkText.length;
+            searchOffset = charStart + 1;
+          }
+          chunks.push({
+            content: chunkText,
+            chunkIndex: chunkIndex++,
+            sectionHeading: currentHeading,
+            charStart: charStart !== -1 ? charStart : null,
+            charEnd: charStart !== -1 ? charEnd : null
+          });
+          pos += 1000; // 200 char overlap
+        }
+        continue;
       }
-      currentChunkText = sentenceChunk;
+      
+      if (currentChunkSentences.length > 0 && (currentChunkTokens + sentenceTokens > 450)) {
+        const chunkText = currentChunkSentences.join(' ');
+        const charStart = normalized.indexOf(chunkText, searchOffset);
+        let charEnd = null;
+        if (charStart !== -1) {
+          charEnd = charStart + chunkText.length;
+          searchOffset = charStart + 1;
+        }
+        
+        chunks.push({
+          content: chunkText,
+          chunkIndex: chunkIndex++,
+          sectionHeading: currentHeading,
+          charStart: charStart !== -1 ? charStart : null,
+          charEnd: charStart !== -1 ? charEnd : null
+        });
+        
+        // Carry over last 2 sentences for overlap context (10-20%)
+        const overlapSentences = currentChunkSentences.slice(-2);
+        currentChunkSentences = [...overlapSentences];
+        currentChunkTokens = currentChunkSentences.reduce((sum, s) => sum + enc.encode(s).length, 0);
+      }
+      
+      currentChunkSentences.push(sentence);
+      currentChunkTokens += sentenceTokens;
     }
   }
-
-  // Add final leftover chunk
-  if (currentChunkText.trim()) {
+  
+  if (currentChunkSentences.length > 0) {
+    const chunkText = currentChunkSentences.join(' ');
+    const charStart = normalized.indexOf(chunkText, searchOffset);
+    let charEnd = null;
+    if (charStart !== -1) {
+      charEnd = charStart + chunkText.length;
+    }
+    
     chunks.push({
-      content: currentChunkText.trim(),
-      chunkIndex: chunkIndex++
+      content: chunkText,
+      chunkIndex: chunkIndex++,
+      sectionHeading: currentHeading,
+      charStart: charStart !== -1 ? charStart : null,
+      charEnd: charStart !== -1 ? charEnd : null
     });
   }
-
+  
   return chunks;
 }
 
@@ -282,10 +390,62 @@ function keywordSearch(query, chunks, limit = 4) {
 }
 
 /**
+ * Decompose a query into sub-queries using LLM
+ */
+async function decomposeQuery(query, chatbot) {
+  const decryptedConfig = chatbot.apiConfig ? {
+    ...chatbot.apiConfig,
+    apiKey: decrypt(chatbot.apiConfig.apiKey),
+  } : null;
+
+  if (decryptedConfig && decryptedConfig.apiKey) {
+    try {
+      const prompt = `You are a query decomposition assistant. Your task is to split a complex search query containing multiple questions or distinct topics into a JSON list of simple, search-optimized sub-queries.
+
+STRICT RULES:
+1. Output ONLY a valid JSON array of strings.
+2. Do NOT output markdown code blocks (no \`\`\`json, no \`\`\`), do NOT write any explanation.
+3. If the query is simple, contains a single question, or cannot be decomposed, return a JSON array with just the original query.
+4. Each sub-query should be a standalone search query.
+
+Example: "What is your pricing and how do I contact support?" -> ["What is your pricing", "how do I contact support"]`;
+
+      const messages = [
+        { role: 'system', content: prompt },
+        { role: 'user', content: query }
+      ];
+
+      const result = await getAIResponse(messages, decryptedConfig);
+      let content = result.content?.trim() || '';
+      
+      if (content.startsWith('```')) {
+        content = content.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+      }
+
+      const parsed = JSON.parse(content);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map(q => q.trim()).filter(Boolean);
+      }
+    } catch (err) {
+      console.warn('LLM query decomposition failed, using fallback:', err.message);
+    }
+  }
+
+  // Fallback: simple heuristic decomposition on question marks or "and"
+  if ((query.match(/\?/g) || []).length > 1) {
+    const parts = query.split(/\?+/).map(q => q.trim()).filter(q => q.length > 5);
+    if (parts.length > 1) {
+      return parts.map(p => p + '?');
+    }
+  }
+  return [query];
+}
+
+/**
  * Retrieve top relevant chunks for a user query
  */
-async function retrieveRelevantContext(query, chatbot, limit = 4) {
-  const SIMILARITY_THRESHOLD = 0.25; // Exclude completely irrelevant matches
+async function retrieveRelevantContext(query, chatbot, limit = 6) {
+  const RELEVANCE_THRESHOLD = 0.75; // Industry-grade relevance threshold
 
   const chunks = await prisma.documentChunk.findMany({
     where: { chatbotId: chatbot.id }
@@ -293,50 +453,92 @@ async function retrieveRelevantContext(query, chatbot, limit = 4) {
 
   if (chunks.length === 0) return '';
 
+  // Decompose query
+  const subQueries = await decomposeQuery(query, chatbot);
+
   // If RAG configurations are missing or disabled, fall back to keyword search
   if (!chatbot.ragEnabled || !chatbot.ragApiKey) {
-    const matched = keywordSearch(query, chunks, limit);
-    // Restore document reading order
-    matched.sort((a, b) => a.chunkIndex - b.chunkIndex);
-    return matched.map(c => c.content).join('\n\n---\n\n');
+    const allMatched = [];
+    for (const subQ of subQueries) {
+      const matched = keywordSearch(subQ, chunks, limit);
+      allMatched.push(...matched);
+    }
+    const uniqueMap = new Map();
+    allMatched.forEach(c => uniqueMap.set(c.id, c));
+    const finalChunks = Array.from(uniqueMap.values());
+    finalChunks.sort((a, b) => a.chunkIndex - b.chunkIndex);
+    return finalChunks.map(c => c.content).join('\n\n---\n\n');
   }
 
   try {
     const decryptedKey = decrypt(chatbot.ragApiKey);
-    const queryVector = await generateEmbedding(query, chatbot.ragProvider, decryptedKey, chatbot.ragModel);
-    
-    const scored = chunks.map(chunk => {
-      let chunkVector = [];
-      try {
-        chunkVector = JSON.parse(chunk.embedding || '[]');
-      } catch(e) {}
+    const uniqueChunksMap = new Map();
+
+    for (const subQ of subQueries) {
+      const queryVector = await generateEmbedding(subQ, chatbot.ragProvider, decryptedKey, chatbot.ragModel);
       
-      const similarity = cosineSimilarity(queryVector, chunkVector);
-      return { chunk, similarity };
-    });
-
-    const matched = scored
-      .filter(item => item.similarity >= SIMILARITY_THRESHOLD)
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, limit)
-      .map(item => item.chunk);
-
-    // If embedding search yielded nothing above threshold, perform keyword fallback
-    if (matched.length === 0) {
-      const fallbackMatched = keywordSearch(query, chunks, 3);
-      fallbackMatched.sort((a, b) => a.chunkIndex - b.chunkIndex);
-      return fallbackMatched.map(c => c.content).join('\n\n---\n\n');
+      for (const chunk of chunks) {
+        let chunkVector = [];
+        try {
+          chunkVector = JSON.parse(chunk.embedding || '[]');
+        } catch (e) {}
+        
+        const similarity = cosineSimilarity(queryVector, chunkVector);
+        if (similarity >= RELEVANCE_THRESHOLD) {
+          const existing = uniqueChunksMap.get(chunk.id);
+          if (!existing || similarity > existing.maxSimilarity) {
+            uniqueChunksMap.set(chunk.id, { chunk, maxSimilarity: similarity });
+          }
+        }
+      }
     }
 
-    // Re-sort results chronologically by chunkIndex to preserve narrative order
-    matched.sort((a, b) => a.chunkIndex - b.chunkIndex);
+    const candidates = Array.from(uniqueChunksMap.values())
+      .sort((a, b) => b.maxSimilarity - a.maxSimilarity);
 
-    return matched.map(c => c.content).join('\n\n---\n\n');
+    // If embedding search yielded nothing above threshold, perform keyword fallback
+    if (candidates.length === 0) {
+      const allFallbackMatched = [];
+      for (const subQ of subQueries) {
+        const fallbackMatched = keywordSearch(subQ, chunks, 3);
+        allFallbackMatched.push(...fallbackMatched);
+      }
+      const uniqueFallbackMap = new Map();
+      allFallbackMatched.forEach(c => uniqueFallbackMap.set(c.id, c));
+      const finalFallback = Array.from(uniqueFallbackMap.values());
+      finalFallback.sort((a, b) => a.chunkIndex - b.chunkIndex);
+      return finalFallback.map(c => c.content).join('\n\n---\n\n');
+    }
+
+    // Cap total injected RAG token budget to 1,500 tokens
+    const BUDGET_LIMIT = 1500;
+    let currentTokens = 0;
+    const selectedChunks = [];
+
+    for (const item of candidates) {
+      const chunkTokens = enc.encode(item.chunk.content).length;
+      if (currentTokens + chunkTokens <= BUDGET_LIMIT) {
+        selectedChunks.push(item.chunk);
+        currentTokens += chunkTokens;
+      }
+    }
+
+    // Re-sort selected chunks chronologically by chunkIndex to preserve narrative order
+    selectedChunks.sort((a, b) => a.chunkIndex - b.chunkIndex);
+
+    return selectedChunks.map(c => c.content).join('\n\n---\n\n');
   } catch (err) {
     console.warn('Embedding search failed, using keyword search fallback:', err.message);
-    const matched = keywordSearch(query, chunks, limit);
-    matched.sort((a, b) => a.chunkIndex - b.chunkIndex);
-    return matched.map(c => c.content).join('\n\n---\n\n');
+    const allFallbackMatched = [];
+    for (const subQ of subQueries) {
+      const matched = keywordSearch(subQ, chunks, limit);
+      allFallbackMatched.push(...matched);
+    }
+    const uniqueFallbackMap = new Map();
+    allFallbackMatched.forEach(c => uniqueFallbackMap.set(c.id, c));
+    const finalFallback = Array.from(uniqueFallbackMap.values());
+    finalFallback.sort((a, b) => a.chunkIndex - b.chunkIndex);
+    return finalFallback.map(c => c.content).join('\n\n---\n\n');
   }
 }
 

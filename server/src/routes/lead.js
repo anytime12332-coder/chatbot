@@ -138,6 +138,9 @@ router.post('/:botId', async (req, res) => {
         chatbotId: botId,
         conversationId: conversationId || null,
         details: detailsStr,
+        isComplete: true,
+        leadScore: 'warm',
+        scoreReasoning: 'Manually converted to lead by administrator.'
       },
       include: {
         conversation: { select: { visitorName: true } }
