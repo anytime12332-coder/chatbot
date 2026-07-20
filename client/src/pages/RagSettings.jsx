@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Database, Save, Sparkles, RefreshCw, Key, ShieldAlert, Check, HelpCircle, FileText, Upload, Copy, Edit, FileCode } from 'lucide-react';
+import { Database, Save, Sparkles, RefreshCw, Key, ShieldAlert, Check, HelpCircle, FileText, Upload, Copy, Edit, FileCode, Search } from 'lucide-react';
 import api from '../lib/api';
 import { useBots } from '../context/BotContext';
 
@@ -32,6 +32,36 @@ export default function RagSettings() {
   // Tab state for knowledge source input
   const [inputTab, setInputTab] = useState('text'); // 'text' or 'upload'
   const [fileProgress, setFileProgress] = useState('');
+
+  // RAG Search inspector states
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [expandedChunks, setExpandedChunks] = useState({});
+
+  async function handleSearch(e) {
+    if (e) e.preventDefault();
+    if (!searchQuery.trim()) return;
+    setSearching(true);
+    setSearchError('');
+    setSearchResults([]);
+    try {
+      const res = await api.post(`/rag/${botId}/search`, { query: searchQuery.trim(), limit: 8 });
+      setSearchResults(res.results || []);
+      if (!res.results || res.results.length === 0) {
+        setSearchError('No matching chunks found in the database for this query.');
+      }
+    } catch (err) {
+      setSearchError(err.message || 'Failed to query RAG search endpoint.');
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function toggleExpandChunk(idx) {
+    setExpandedChunks(prev => ({ ...prev, [idx]: !prev[idx] }));
+  }
 
   useEffect(() => {
     if (botId) loadRagConfig();
@@ -488,6 +518,118 @@ export default function RagSettings() {
                 </div>
               )}
             </div>
+
+            {/* RAG Query Inspector */}
+            {chunkCount > 0 && (
+              <div className="card space-y-4 border border-indigo-100 shadow-sm hover:shadow-md transition-all rounded-2xl bg-white p-6">
+                <div className="flex items-center gap-2 border-b border-gray-100 pb-3">
+                  <div className="w-8 h-8 bg-indigo-50 rounded-lg flex items-center justify-center">
+                    <Search className="w-4 h-4 text-indigo-600" />
+                  </div>
+                  <div>
+                    <h4 className="font-semibold text-gray-950 text-sm">RAG Query Inspector & Tester</h4>
+                    <p className="text-[11px] text-gray-400">Test search queries to see exactly which chunks will be retrieved for your bot's system prompt</p>
+                  </div>
+                </div>
+
+                <form onSubmit={handleSearch} className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-3.5 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      placeholder="Type a test question (e.g., 'What is your refund policy?')..."
+                      className="input-field pl-9 text-sm py-2.5"
+                      required
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={searching}
+                    className="btn-primary py-2.5 px-4 text-xs font-semibold flex items-center gap-1.5 whitespace-nowrap bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-colors disabled:opacity-50"
+                  >
+                    {searching ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                    Test Retrieval
+                  </button>
+                </form>
+
+                {searchError && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs">
+                    ⚠️ {searchError}
+                  </div>
+                )}
+
+                {searchResults.length > 0 && (
+                  <div className="space-y-3 pt-1">
+                    <div className="flex justify-between items-center text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                      <span>Retrieved Chunks ({searchResults.length})</span>
+                      <span className="text-[10px] text-indigo-500 font-medium lowercase">sorted by hybrid match rank</span>
+                    </div>
+
+                    <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
+                      {searchResults.map((item, idx) => {
+                        const isExpanded = !!expandedChunks[item.chunkIndex];
+                        return (
+                          <div
+                            key={item.id}
+                            className="bg-white border border-gray-150 hover:border-indigo-200 rounded-xl p-3.5 transition-all text-xs space-y-2.5 relative shadow-sm"
+                          >
+                            {/* Header details */}
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-50 pb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="bg-indigo-600 text-white font-bold text-[10px] px-2 py-0.5 rounded-full shadow-sm">
+                                  Rank #{idx + 1}
+                                </span>
+                                <span className="text-[10px] text-gray-400 font-medium">
+                                  Chunk Index: #{item.chunkIndex}
+                                </span>
+                              </div>
+                              
+                              <div className="flex items-center gap-2">
+                                <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 font-semibold px-2 py-0.5 rounded-md text-[9px]">
+                                  Semantic: {(item.semanticSim * 100).toFixed(0)}%
+                                </span>
+                                <span className="bg-sky-50 text-sky-700 border border-sky-100 font-semibold px-2 py-0.5 rounded-md text-[9px]">
+                                  Keyword: {(item.lexicalScore * 100).toFixed(0)}%
+                                </span>
+                                <span className="bg-indigo-50 text-indigo-700 border border-indigo-150 font-bold px-2 py-0.5 rounded-md text-[9px]">
+                                  Score: {item.hybridScore.toFixed(3)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Section heading path */}
+                            {item.sectionHeading && (
+                              <div className="text-[10px] text-indigo-600 font-semibold bg-indigo-50/50 py-0.5 px-2 rounded inline-block">
+                                Heading: {item.sectionHeading}
+                              </div>
+                            )}
+
+                            {/* Text content */}
+                            <div className="relative">
+                              <p className={`text-gray-755 leading-relaxed font-sans ${isExpanded ? 'whitespace-pre-wrap font-mono bg-gray-50 p-2.5 rounded-lg border border-gray-100' : 'line-clamp-3'}`}>
+                                {item.content}
+                              </p>
+                              
+                              {item.content.length > 250 && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleExpandChunk(item.chunkIndex)}
+                                  className="text-indigo-600 hover:text-indigo-700 font-bold mt-1.5 block focus:outline-none transition-colors"
+                                >
+                                  {isExpanded ? 'Show Less ▲' : 'Show Full Content ▼'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Guidelines Sidebar */}

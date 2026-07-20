@@ -172,7 +172,8 @@ router.put('/:id', async (req, res) => {
           let embeddingStr = '[]';
           if (decryptedKey) {
             try {
-              const embeddingVector = await generateEmbedding(chunkObj.content, chatbot.ragProvider, decryptedKey, chatbot.ragModel);
+              const textToEmbed = chunkObj.sectionHeading ? `[Section: ${chunkObj.sectionHeading}]\n${chunkObj.content}` : chunkObj.content;
+              const embeddingVector = await generateEmbedding(textToEmbed, chatbot.ragProvider, decryptedKey, chatbot.ragModel);
               embeddingStr = JSON.stringify(embeddingVector);
             } catch (e) {
               console.warn(`Auto-embedding generation failed in chatbot update: ${e.message}`);

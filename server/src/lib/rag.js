@@ -58,89 +58,82 @@ function splitSentences(text) {
 function splitTextIntoChunks(text, targetTokens = 400) {
   if (!text || !text.trim()) return [];
 
-  // Step 1: Normalize vertical spacing and horizontal spacing
+  // Normalize vertical and horizontal spacing
   const normalized = text
     .replace(/\r\n/g, '\n')
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
-  const paragraphs = normalized.split(/\n\n+/);
+  // Production-level chunk size: 800 characters, overlap: 150 characters (approx 200/35 tokens)
+  const chunkSize = 800;
+  const chunkOverlap = 150;
+
+  const separators = ['\n\n', '\n', '. ', '! ', '? ', ' ', ''];
+
+  // Helper to split a text by separators recursively
+  function splitOnSeparators(textToSplit, separatorIndex) {
+    if (textToSplit.length <= chunkSize) {
+      return [textToSplit];
+    }
+    if (separatorIndex >= separators.length) {
+      // Out of separators, fallback to character slicing
+      const result = [];
+      let pos = 0;
+      while (pos < textToSplit.length) {
+        result.push(textToSplit.substring(pos, pos + chunkSize));
+        pos += chunkSize;
+      }
+      return result;
+    }
+    const separator = separators[separatorIndex];
+    const parts = textToSplit.split(separator);
+    const result = [];
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      if (part === '') continue;
+      // Re-add separator to parts (except last one or if separator is empty)
+      const partWithSep = (i < parts.length - 1 && separator !== '') ? part + separator : part;
+      
+      if (partWithSep.length > chunkSize) {
+        result.push(...splitOnSeparators(partWithSep, separatorIndex + 1));
+      } else {
+        result.push(partWithSep);
+      }
+    }
+    return result;
+  }
+
+  const parts = splitOnSeparators(normalized, 0);
+
+  // Group parts into chunks with overlap
   const chunks = [];
   let chunkIndex = 0;
-  
-  let currentChunkSentences = [];
-  let currentChunkTokens = 0;
+  let currentChunkParts = [];
+  let currentChunkLength = 0;
   let currentHeading = null;
   let searchOffset = 0;
-  
-  for (let i = 0; i < paragraphs.length; i++) {
-    const para = paragraphs[i].trim();
-    if (!para) continue;
-    
+
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+
     // Heading detection heuristic:
-    const isHeading = para.startsWith('#') || (para.length < 100 && !para.includes('\n') && !/[.!?]$/.test(para));
+    const isHeading = part.startsWith('#') || (part.length < 100 && !part.includes('\n') && !/[.!?]$/.test(part));
     if (isHeading) {
-      currentHeading = para.replace(/^#+\s*/, '').trim();
+      currentHeading = part.replace(/^#+\s*/, '').trim();
     }
-    
-    const sentences = splitSentences(para);
-    
-    for (const sentence of sentences) {
-      const sentenceTokens = enc.encode(sentence).length;
-      
-      // Giant sentence fallback
-      if (sentenceTokens > 500) {
-        if (currentChunkSentences.length > 0) {
-          const chunkText = currentChunkSentences.join(' ');
-          const charStart = normalized.indexOf(chunkText, searchOffset);
-          let charEnd = null;
-          if (charStart !== -1) {
-            charEnd = charStart + chunkText.length;
-            searchOffset = charStart + 1;
-          }
-          chunks.push({
-            content: chunkText,
-            chunkIndex: chunkIndex++,
-            sectionHeading: currentHeading,
-            charStart: charStart !== -1 ? charStart : null,
-            charEnd: charStart !== -1 ? charEnd : null
-          });
-          currentChunkSentences = [];
-          currentChunkTokens = 0;
-        }
-        
-        // Split by raw character size as last resort
-        let pos = 0;
-        while (pos < sentence.length) {
-          const chunkText = sentence.substring(pos, pos + 1200);
-          const charStart = normalized.indexOf(chunkText, searchOffset);
-          let charEnd = null;
-          if (charStart !== -1) {
-            charEnd = charStart + chunkText.length;
-            searchOffset = charStart + 1;
-          }
-          chunks.push({
-            content: chunkText,
-            chunkIndex: chunkIndex++,
-            sectionHeading: currentHeading,
-            charStart: charStart !== -1 ? charStart : null,
-            charEnd: charStart !== -1 ? charEnd : null
-          });
-          pos += 1000; // 200 char overlap
-        }
-        continue;
-      }
-      
-      if (currentChunkSentences.length > 0 && (currentChunkTokens + sentenceTokens > 450)) {
-        const chunkText = currentChunkSentences.join(' ');
+
+    if (currentChunkLength + part.length > chunkSize && currentChunkParts.length > 0) {
+      // Chunk is full, finalize it
+      const chunkText = currentChunkParts.join('').trim();
+      if (chunkText) {
         const charStart = normalized.indexOf(chunkText, searchOffset);
         let charEnd = null;
         if (charStart !== -1) {
           charEnd = charStart + chunkText.length;
           searchOffset = charStart + 1;
         }
-        
+
         chunks.push({
           content: chunkText,
           chunkIndex: chunkIndex++,
@@ -148,35 +141,43 @@ function splitTextIntoChunks(text, targetTokens = 400) {
           charStart: charStart !== -1 ? charStart : null,
           charEnd: charStart !== -1 ? charEnd : null
         });
-        
-        // Carry over last 2 sentences for overlap context (10-20%)
-        const overlapSentences = currentChunkSentences.slice(-2);
-        currentChunkSentences = [...overlapSentences];
-        currentChunkTokens = currentChunkSentences.reduce((sum, s) => sum + enc.encode(s).length, 0);
       }
-      
-      currentChunkSentences.push(sentence);
-      currentChunkTokens += sentenceTokens;
+
+      // Rollback currentChunkParts to satisfy overlap
+      while (currentChunkParts.length > 0) {
+        const remainingLength = currentChunkParts.join('').length;
+        if (remainingLength <= chunkOverlap || currentChunkParts.length === 1) {
+          break;
+        }
+        currentChunkParts.shift();
+      }
+      currentChunkLength = currentChunkParts.join('').length;
+    }
+
+    currentChunkParts.push(part);
+    currentChunkLength += part.length;
+  }
+
+  // Push final chunk if any
+  if (currentChunkParts.length > 0) {
+    const chunkText = currentChunkParts.join('').trim();
+    if (chunkText) {
+      const charStart = normalized.indexOf(chunkText, searchOffset);
+      let charEnd = null;
+      if (charStart !== -1) {
+        charEnd = charStart + chunkText.length;
+      }
+
+      chunks.push({
+        content: chunkText,
+        chunkIndex: chunkIndex++,
+        sectionHeading: currentHeading,
+        charStart: charStart !== -1 ? charStart : null,
+        charEnd: charStart !== -1 ? charEnd : null
+      });
     }
   }
-  
-  if (currentChunkSentences.length > 0) {
-    const chunkText = currentChunkSentences.join(' ');
-    const charStart = normalized.indexOf(chunkText, searchOffset);
-    let charEnd = null;
-    if (charStart !== -1) {
-      charEnd = charStart + chunkText.length;
-    }
-    
-    chunks.push({
-      content: chunkText,
-      chunkIndex: chunkIndex++,
-      sectionHeading: currentHeading,
-      charStart: charStart !== -1 ? charStart : null,
-      charEnd: charStart !== -1 ? charEnd : null
-    });
-  }
-  
+
   return chunks;
 }
 
@@ -444,30 +445,70 @@ Example: "What is your pricing and how do I contact support?" -> ["What is your 
 /**
  * Retrieve top relevant chunks for a user query
  */
-async function retrieveRelevantContext(query, chatbot, limit = 6) {
-  const RELEVANCE_THRESHOLD = 0.75; // Industry-grade relevance threshold
+async function getHybridSearchResults(query, chatbot, limit = 8) {
+  const RELEVANCE_THRESHOLD = 0.35; // Gentle threshold to filter out noise
+  const ALPHA = 0.7; // Hybrid weights: 70% semantic, 30% lexical
 
   const chunks = await prisma.documentChunk.findMany({
     where: { chatbotId: chatbot.id }
   });
 
-  if (chunks.length === 0) return '';
+  if (chunks.length === 0) return [];
 
   // Decompose query
   const subQueries = await decomposeQuery(query, chatbot);
 
-  // If RAG configurations are missing or disabled, fall back to keyword search
-  if (!chatbot.ragEnabled || !chatbot.ragApiKey) {
-    const allMatched = [];
+  // Helper to calculate lexical score (0.0 to 1.0)
+  function getLexicalScore(subQuery, chunkContent) {
+    const stopwords = new Set(['a', 'an', 'the', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 'to', 'of', 'in', 'on', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'from', 'up', 'down', 'in', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once']);
+    
+    const queryTerms = subQuery.toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .split(/\s+/)
+      .filter(t => t.length > 1 && !stopwords.has(t));
+      
+    if (queryTerms.length === 0) return 0;
+    
+    const contentLower = chunkContent.toLowerCase();
+    let matches = 0;
+    
+    queryTerms.forEach(term => {
+      if (contentLower.includes(term)) {
+        matches++;
+        // Add exact boundary match bonus
+        const regex = new RegExp('\\b' + term + '\\b', 'i');
+        if (regex.test(contentLower)) {
+          matches += 0.2;
+        }
+      }
+    });
+    
+    return Math.min(1.0, matches / queryTerms.length);
+  }
+
+  const runKeywordFallback = () => {
+    const uniqueMap = new Map();
     for (const subQ of subQueries) {
       const matched = keywordSearch(subQ, chunks, limit);
-      allMatched.push(...matched);
+      matched.forEach((chunk, index) => {
+        const existing = uniqueMap.get(chunk.id);
+        const score = 1.0 - (index / limit); // proxy score based on rank
+        if (!existing || score > existing.hybridScore) {
+          uniqueMap.set(chunk.id, {
+            chunk,
+            semanticSim: 0,
+            lexicalScore: score,
+            hybridScore: score
+          });
+        }
+      });
     }
-    const uniqueMap = new Map();
-    allMatched.forEach(c => uniqueMap.set(c.id, c));
-    const finalChunks = Array.from(uniqueMap.values());
-    finalChunks.sort((a, b) => a.chunkIndex - b.chunkIndex);
-    return finalChunks.map(c => c.content).join('\n\n---\n\n');
+    return Array.from(uniqueMap.values()).sort((a, b) => b.hybridScore - a.hybridScore);
+  };
+
+  // If RAG configurations are missing or disabled, fall back to keyword search
+  if (!chatbot.ragEnabled || !chatbot.ragApiKey) {
+    return runKeywordFallback();
   }
 
   try {
@@ -475,7 +516,8 @@ async function retrieveRelevantContext(query, chatbot, limit = 6) {
     const uniqueChunksMap = new Map();
 
     for (const subQ of subQueries) {
-      const queryVector = await generateEmbedding(subQ, chatbot.ragProvider, decryptedKey, chatbot.ragModel);
+      const textToEmbed = subQ;
+      const queryVector = await generateEmbedding(textToEmbed, chatbot.ragProvider, decryptedKey, chatbot.ragModel);
       
       for (const chunk of chunks) {
         let chunkVector = [];
@@ -483,35 +525,48 @@ async function retrieveRelevantContext(query, chatbot, limit = 6) {
           chunkVector = JSON.parse(chunk.embedding || '[]');
         } catch (e) {}
         
-        const similarity = cosineSimilarity(queryVector, chunkVector);
-        if (similarity >= RELEVANCE_THRESHOLD) {
+        const semanticSim = cosineSimilarity(queryVector, chunkVector);
+        const lexicalScore = getLexicalScore(subQ, chunk.content);
+        
+        // Calculate hybrid score
+        const hybridScore = ALPHA * semanticSim + (1 - ALPHA) * lexicalScore;
+        
+        // Keep if semantic matches gentle threshold or keyword match is strong
+        if (semanticSim >= RELEVANCE_THRESHOLD || lexicalScore >= 0.8) {
           const existing = uniqueChunksMap.get(chunk.id);
-          if (!existing || similarity > existing.maxSimilarity) {
-            uniqueChunksMap.set(chunk.id, { chunk, maxSimilarity: similarity });
+          if (!existing || hybridScore > existing.hybridScore) {
+            uniqueChunksMap.set(chunk.id, { 
+              chunk, 
+              semanticSim, 
+              lexicalScore, 
+              hybridScore 
+            });
           }
         }
       }
     }
 
-    const candidates = Array.from(uniqueChunksMap.values())
-      .sort((a, b) => b.maxSimilarity - a.maxSimilarity);
-
-    // If embedding search yielded nothing above threshold, perform keyword fallback
-    if (candidates.length === 0) {
-      const allFallbackMatched = [];
-      for (const subQ of subQueries) {
-        const fallbackMatched = keywordSearch(subQ, chunks, 3);
-        allFallbackMatched.push(...fallbackMatched);
-      }
-      const uniqueFallbackMap = new Map();
-      allFallbackMatched.forEach(c => uniqueFallbackMap.set(c.id, c));
-      const finalFallback = Array.from(uniqueFallbackMap.values());
-      finalFallback.sort((a, b) => a.chunkIndex - b.chunkIndex);
-      return finalFallback.map(c => c.content).join('\n\n---\n\n');
+    const results = Array.from(uniqueChunksMap.values()).sort((a, b) => b.hybridScore - a.hybridScore);
+    if (results.length === 0) {
+      return runKeywordFallback();
     }
+    return results;
+  } catch (err) {
+    console.warn('Embedding search failed, using keyword search fallback:', err.message);
+    return runKeywordFallback();
+  }
+}
 
-    // Cap total injected RAG token budget to 1,500 tokens
-    const BUDGET_LIMIT = 1500;
+/**
+ * Retrieve top relevant chunks for a user query
+ */
+async function retrieveRelevantContext(query, chatbot, limit = 8) {
+  try {
+    const candidates = await getHybridSearchResults(query, chatbot, limit);
+    if (candidates.length === 0) return '';
+
+    // Cap total injected RAG token budget to 2500 tokens
+    const BUDGET_LIMIT = 2500;
     let currentTokens = 0;
     const selectedChunks = [];
 
@@ -521,6 +576,7 @@ async function retrieveRelevantContext(query, chatbot, limit = 6) {
         selectedChunks.push(item.chunk);
         currentTokens += chunkTokens;
       }
+      if (selectedChunks.length >= limit) break;
     }
 
     // Re-sort selected chunks chronologically by chunkIndex to preserve narrative order
@@ -528,22 +584,14 @@ async function retrieveRelevantContext(query, chatbot, limit = 6) {
 
     return selectedChunks.map(c => c.content).join('\n\n---\n\n');
   } catch (err) {
-    console.warn('Embedding search failed, using keyword search fallback:', err.message);
-    const allFallbackMatched = [];
-    for (const subQ of subQueries) {
-      const matched = keywordSearch(subQ, chunks, limit);
-      allFallbackMatched.push(...matched);
-    }
-    const uniqueFallbackMap = new Map();
-    allFallbackMatched.forEach(c => uniqueFallbackMap.set(c.id, c));
-    const finalFallback = Array.from(uniqueFallbackMap.values());
-    finalFallback.sort((a, b) => a.chunkIndex - b.chunkIndex);
-    return finalFallback.map(c => c.content).join('\n\n---\n\n');
+    console.error('retrieveRelevantContext error:', err);
+    return '';
   }
 }
 
 module.exports = {
   splitTextIntoChunks,
   generateEmbedding,
+  getHybridSearchResults,
   retrieveRelevantContext
 };

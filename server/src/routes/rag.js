@@ -109,7 +109,8 @@ router.post('/:botId/rebuild', async (req, res) => {
       let embeddingStr = '[]';
       if (chatbot.ragEnabled && decryptedKey) {
         try {
-          const embeddingVector = await generateEmbedding(chunkObj.content, chatbot.ragProvider, decryptedKey, chatbot.ragModel);
+          const textToEmbed = chunkObj.sectionHeading ? `[Section: ${chunkObj.sectionHeading}]\n${chunkObj.content}` : chunkObj.content;
+          const embeddingVector = await generateEmbedding(textToEmbed, chatbot.ragProvider, decryptedKey, chatbot.ragModel);
           embeddingStr = JSON.stringify(embeddingVector);
         } catch (e) {
           console.warn(`Failed to generate embedding for chunk: ${e.message}. Saving without embedding.`);
@@ -184,7 +185,8 @@ router.put('/:botId', async (req, res) => {
           let embeddingStr = '[]';
           if (decryptedKey) {
             try {
-              const embeddingVector = await generateEmbedding(chunkObj.content, updated.ragProvider, decryptedKey, updated.ragModel);
+              const textToEmbed = chunkObj.sectionHeading ? `[Section: ${chunkObj.sectionHeading}]\n${chunkObj.content}` : chunkObj.content;
+              const embeddingVector = await generateEmbedding(textToEmbed, updated.ragProvider, decryptedKey, updated.ragModel);
               embeddingStr = JSON.stringify(embeddingVector);
             } catch (e) {
               console.warn(`Auto-embedding generation failed: ${e.message}`);
@@ -250,6 +252,43 @@ router.get('/chunks/:botId', async (req, res) => {
   } catch (error) {
     console.error('Get chunks error:', error);
     res.status(500).json({ error: 'Failed to retrieve chunks' });
+  }
+});
+
+// POST /api/rag/:botId/search - Test search query against RAG chunks
+router.post('/:botId/search', async (req, res) => {
+  try {
+    const { botId } = req.params;
+    const { query, limit } = req.body;
+
+    if (!query || !query.trim()) {
+      return res.status(400).json({ error: 'Search query is required' });
+    }
+
+    const chatbot = await prisma.chatbot.findFirst({
+      where: { id: botId, adminId: req.admin.id }
+    });
+    if (!chatbot) return res.status(404).json({ error: 'Chatbot not found' });
+
+    const { getHybridSearchResults } = require('../lib/rag');
+    const searchLimit = limit ? parseInt(limit) : 8;
+    const results = await getHybridSearchResults(query.trim(), chatbot, searchLimit);
+
+    // Map results to client-friendly format
+    const formattedResults = results.map(item => ({
+      id: item.chunk.id,
+      chunkIndex: item.chunk.chunkIndex,
+      content: item.chunk.content,
+      sectionHeading: item.chunk.sectionHeading,
+      semanticSim: item.semanticSim,
+      lexicalScore: item.lexicalScore,
+      hybridScore: item.hybridScore
+    }));
+
+    res.json({ results: formattedResults });
+  } catch (error) {
+    console.error('RAG test search error:', error);
+    res.status(500).json({ error: error.message || 'Failed to search RAG database' });
   }
 });
 
