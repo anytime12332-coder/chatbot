@@ -2,13 +2,21 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   Bot, Save, Building2, MessageSquare, Palette, Plus, Trash2,
-  Image, Layout, Star, Sparkles, Moon, Briefcase, Layers
+  Image, Layout, Star, Sparkles, Moon, Briefcase, Layers,
+  Shield, MessageCircle, ThumbsUp
 } from 'lucide-react';
 import api from '../lib/api';
 import { useBots } from '../context/BotContext';
 
 // ─── Template Presets ────────────────────────────────────────────────────────
 const TEMPLATES = [
+  {
+    id: 'hubspot_default',
+    name: 'HubSpot Style',
+    Icon: MessageCircle,
+    badge: 'NEW',
+    preview: { from: '#1a1a2e', to: '#ff7a59', bubble: '#f0f0f0', text: '#1a1a2e', userBg: '#ff7a59' },
+  },
   {
     id: 'modern_gradient',
     name: 'Modern Gradient',
@@ -43,12 +51,14 @@ const TEMPLATES = [
 
 // ─── Live Widget Preview ──────────────────────────────────────────────────────
 function WidgetPreview({ config, theme }) {
-  const tpl = TEMPLATES.find(t => t.id === (theme.templateId || 'modern_gradient')) || TEMPLATES[0];
+  const tpl = TEMPLATES.find(t => t.id === (theme.templateId || 'hubspot_default')) || TEMPLATES[0];
   const primary = theme.primaryColor || config.primaryColor || tpl.preview.from;
+  const isHubspot = theme.templateId === 'hubspot_default';
   const headerBg = theme.templateId === 'modern_gradient'
     ? `linear-gradient(135deg, ${tpl.preview.from} 0%, ${tpl.preview.to} 100%)`
+    : isHubspot ? tpl.preview.from
     : (theme.headerBg || tpl.preview.from);
-  const userBg = theme.userBubbleColor || primary;
+  const userBg = theme.userBubbleColor || (isHubspot ? '#ff7a59' : primary);
   const botBg = theme.botBubbleColor || tpl.preview.bubble;
   const botText = tpl.preview.text;
   const isDark = theme.templateId === 'dark_mode';
@@ -61,43 +71,37 @@ function WidgetPreview({ config, theme }) {
         width: 280,
         borderRadius: theme.templateId === 'corporate' ? 0 : theme.templateId === 'playful' ? 24 : 16,
         overflow: 'hidden',
-        boxShadow: isDark
-          ? '0 12px 40px rgba(0,0,0,.5)'
-          : '0 10px 30px rgba(99,102,241,.12)',
-        fontFamily: theme.templateId === 'corporate' ? 'Georgia, serif' : 'system-ui, sans-serif',
+        boxShadow: isDark ? '0 12px 40px rgba(0,0,0,.5)' : '0 10px 30px rgba(0,0,0,.12)',
+        fontFamily: isHubspot ? '-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif' : theme.templateId === 'corporate' ? 'Georgia, serif' : 'system-ui, sans-serif',
         flexShrink: 0,
+        border: isDark ? '1px solid #1e293b' : '1px solid rgba(0,0,0,.07)',
       }}
     >
       {/* Header */}
       <div
         style={{
           background: headerBg,
-          padding: '12px 16px',
+          padding: isHubspot ? '14px 16px' : '12px 16px',
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: 10,
         }}
       >
-        {theme.logoUrl && (
-          <img
-            src={theme.logoUrl}
-            alt="Logo"
-            style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover' }}
-          />
+        {/* Avatar in header */}
+        {theme.logoUrl ? (
+          <img src={theme.logoUrl} alt="Logo" style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255,255,255,.3)' }} />
+        ) : (
+          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(255,255,255,.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
+            {(config.name || 'AI').substring(0, 2).toUpperCase()}
+          </div>
         )}
-        <span style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>
-          {config.name || 'Chat'}
-        </span>
-        <span
-          style={{
-            marginLeft: 'auto',
-            color: 'rgba(255,255,255,.7)',
-            fontSize: 18,
-            lineHeight: 1,
-          }}
-        >
-          ×
-        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: '#fff', fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {config.name || 'Chat'}
+          </div>
+          {isHubspot && <div style={{ color: 'rgba(255,255,255,.65)', fontSize: 10, marginTop: 1 }}>● Powered by AI</div>}
+        </div>
+        <span style={{ color: 'rgba(255,255,255,.7)', fontSize: 20, lineHeight: 1, marginLeft: 'auto', cursor: 'pointer' }}>×</span>
       </div>
 
       {/* Messages area */}
@@ -246,55 +250,26 @@ function WidgetPreview({ config, theme }) {
 
       {/* Input area */}
       <div style={{ borderTop: `1px solid ${isDark ? '#1e293b' : '#e2e8f0'}`, background: isDark ? '#0f172a' : '#fff' }}>
-        <div
-          style={{
-            padding: '8px 10px 4px',
-            display: 'flex',
-            gap: 6,
-            alignItems: 'center',
-          }}
-        >
-          <div
-            style={{
-              flex: 1,
-              background: isDark ? '#1e293b' : '#f8fafc',
-              border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
-              borderRadius: 8,
-              height: 28,
-              fontSize: 11,
-              color: '#94a3b8',
-              display: 'flex',
-              alignItems: 'center',
-              paddingLeft: 8,
-            }}
-          >
+        {/* Privacy banner */}
+        {theme.privacyPolicyText && (
+          <div style={{ background: isDark ? '#1e3a5f' : '#fff9e6', borderBottom: `1px solid ${isDark ? '#2d4a6e' : '#fde68a'}`, padding: '8px 12px', fontSize: 10.5, color: isDark ? '#93c5fd' : '#78350f', display: 'flex', alignItems: 'flex-start', gap: 6, lineHeight: 1.4 }}>
+            <span style={{ flex: 1 }}>
+              {theme.privacyPolicyText}
+              {theme.privacyPolicyUrl && <span style={{ color: primary, fontWeight: 600, textDecoration: 'underline', marginLeft: 3 }}>privacy policy</span>}
+            </span>
+            <span style={{ color: 'inherit', opacity: 0.5, fontSize: 14, cursor: 'pointer' }}>×</span>
+          </div>
+        )}
+        <div style={{ padding: '8px 10px 4px', display: 'flex', gap: 6, alignItems: 'center' }}>
+          <div style={{ flex: 1, background: isDark ? '#1e293b' : '#f8fafc', border: `1.5px solid ${isDark ? '#334155' : '#e2e8f0'}`, borderRadius: 10, height: 30, fontSize: 11, color: '#94a3b8', display: 'flex', alignItems: 'center', paddingLeft: 10 }}>
             Type a message…
           </div>
-          <div
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 8,
-              background: primary,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <svg viewBox="0 0 24 24" width={14} height={14} fill="#fff">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-            </svg>
+          <div style={{ width: 32, height: 32, borderRadius: 10, background: userBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <svg viewBox="0 0 24 24" width={14} height={14} fill="#fff"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
           </div>
         </div>
         {theme.disclaimerText && (
-          <div
-            style={{
-              fontSize: 9,
-              color: '#94a3b8',
-              textAlign: 'center',
-              padding: '0 10px 6px',
-            }}
-          >
+          <div style={{ fontSize: 9.5, color: '#94a3b8', textAlign: 'center', padding: '0 10px 7px' }}>
             {theme.disclaimerText}
           </div>
         )}
@@ -315,7 +290,7 @@ export default function BotConfig() {
   });
 
   const [theme, setTheme] = useState({
-    templateId: 'modern_gradient',
+    templateId: 'hubspot_default',
     logoUrl: '',
     launcherIconUrl: '',
     primaryColor: '',
@@ -328,6 +303,12 @@ export default function BotConfig() {
     calloutMessage: '',
     calloutDelay: 3,
     disclaimerText: '',
+    privacyPolicyUrl: '',
+    privacyPolicyText: '',
+    feedbackEnabled: true,
+    feedbackBadUrl: '',
+    feedbackNeutralUrl: '',
+    feedbackGoodUrl: '',
   });
 
   const [newChip, setNewChip] = useState('');
@@ -361,7 +342,7 @@ export default function BotConfig() {
       } catch (_) {}
 
       setTheme({
-        templateId: parsedTheme.templateId || 'modern_gradient',
+        templateId: parsedTheme.templateId || 'hubspot_default',
         logoUrl: parsedTheme.logoUrl || '',
         launcherIconUrl: parsedTheme.launcherIconUrl || '',
         primaryColor: parsedTheme.primaryColor || '',
@@ -374,6 +355,12 @@ export default function BotConfig() {
         calloutMessage: parsedTheme.calloutMessage || '',
         calloutDelay: parsedTheme.calloutDelay ?? 3,
         disclaimerText: parsedTheme.disclaimerText || '',
+        privacyPolicyUrl: parsedTheme.privacyPolicyUrl || '',
+        privacyPolicyText: parsedTheme.privacyPolicyText || '',
+        feedbackEnabled: parsedTheme.feedbackEnabled ?? true,
+        feedbackBadUrl: parsedTheme.feedbackBadUrl || '',
+        feedbackNeutralUrl: parsedTheme.feedbackNeutralUrl || '',
+        feedbackGoodUrl: parsedTheme.feedbackGoodUrl || '',
       });
     } catch (err) {
       console.error('Load config error:', err);
@@ -629,6 +616,11 @@ export default function BotConfig() {
                             {tpl.name}
                           </span>
                         </div>
+                        {tpl.badge && !isActive && (
+                          <span className="absolute top-1.5 right-1.5 bg-orange-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                            {tpl.badge}
+                          </span>
+                        )}
                         {isActive && (
                           <span className="absolute top-2 right-2 w-4 h-4 bg-primary-500 rounded-full flex items-center justify-center">
                             <svg viewBox="0 0 12 12" className="w-2.5 h-2.5 text-white fill-white">
@@ -854,6 +846,90 @@ export default function BotConfig() {
                       <span className="text-xs font-medium text-gray-600">Enable AI Thinking Animation</span>
                     </label>
                   </div>
+                </div>
+
+                {/* Privacy Policy Banner */}
+                <div className="border-t border-gray-100 pt-4 space-y-3">
+                  <label className="block text-sm font-semibold text-gray-800 flex items-center gap-1.5">
+                    <Shield className="w-4 h-4 text-yellow-500" /> Privacy Policy Banner
+                  </label>
+                  <p className="text-[11px] text-gray-400 -mt-1">Shown above the input box. Users can dismiss it. Stays hidden after first dismissal.</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Banner Text</label>
+                      <textarea
+                        value={theme.privacyPolicyText}
+                        onChange={e => updateTheme('privacyPolicyText', e.target.value)}
+                        className="input-field text-sm"
+                        rows={2}
+                        placeholder="e.g. We use the info you share to contact you about our services."
+                      />
+                      <p className="text-[11px] text-gray-400 mt-1">Leave blank to disable the banner</p>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Privacy Policy URL</label>
+                      <input
+                        type="url"
+                        value={theme.privacyPolicyUrl}
+                        onChange={e => updateTheme('privacyPolicyUrl', e.target.value)}
+                        className="input-field text-sm"
+                        placeholder="https://yoursite.com/privacy"
+                      />
+                      <p className="text-[11px] text-gray-400 mt-1">Linked as &quot;privacy policy&quot; at the end of the banner text</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Feedback Survey */}
+                <div className="border-t border-gray-100 pt-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-sm font-semibold text-gray-800 flex items-center gap-1.5">
+                      <ThumbsUp className="w-4 h-4 text-green-500" /> End-of-Chat Feedback Survey
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={theme.feedbackEnabled}
+                        onChange={e => updateTheme('feedbackEnabled', e.target.checked)}
+                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 h-4 w-4"
+                      />
+                      <span className="text-xs font-medium text-gray-600">Enabled</span>
+                    </label>
+                  </div>
+                  <p className="text-[11px] text-gray-400 -mt-1">Shows a satisfaction survey when the user says &quot;thanks&quot;, &quot;bye&quot;, &quot;done&quot;, etc. Uses professional icons by default. Optionally replace with your own.</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">😞 Not Satisfied Icon URL <span className="text-gray-300">(optional)</span></label>
+                      <input
+                        type="url"
+                        value={theme.feedbackBadUrl}
+                        onChange={e => updateTheme('feedbackBadUrl', e.target.value)}
+                        className="input-field text-sm"
+                        placeholder="https://yoursite.com/bad.png"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">😐 Neutral Icon URL <span className="text-gray-300">(optional)</span></label>
+                      <input
+                        type="url"
+                        value={theme.feedbackNeutralUrl}
+                        onChange={e => updateTheme('feedbackNeutralUrl', e.target.value)}
+                        className="input-field text-sm"
+                        placeholder="https://yoursite.com/neutral.png"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">😊 Satisfied Icon URL <span className="text-gray-300">(optional)</span></label>
+                      <input
+                        type="url"
+                        value={theme.feedbackGoodUrl}
+                        onChange={e => updateTheme('feedbackGoodUrl', e.target.value)}
+                        className="input-field text-sm"
+                        placeholder="https://yoursite.com/good.png"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-gray-400">Leave blank to use the built-in professional SVG icons. Upload any PNG/SVG/WebP image or paste a direct URL.</p>
                 </div>
               </div>
             </div>

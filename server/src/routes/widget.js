@@ -35,6 +35,34 @@ router.get('/config', async (req, res) => {
   }
 });
 
+// POST /widget/feedback — save conversation rating
+router.post('/feedback', async (req, res) => {
+  try {
+    const { sessionId, botId, rating, label } = req.body;
+    if (!sessionId || !rating) return res.status(400).json({ error: 'sessionId and rating required' });
+
+    const conversation = await prisma.conversation.findFirst({
+      where: { sessionId, ...(botId ? { chatbotId: botId } : {}), status: 'active' },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (conversation) {
+      let existing = {};
+      try { existing = JSON.parse(conversation.collectedData || '{}'); } catch (_) {}
+      existing.__feedback = { rating, label, submittedAt: new Date().toISOString() };
+      await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { collectedData: JSON.stringify(existing), updatedAt: new Date() },
+      });
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Feedback save error:', error);
+    res.status(500).json({ error: 'Failed to save feedback' });
+  }
+});
+
 // GET /widget/embed.js - Embeddable widget with STREAMING support
 router.get('/embed.js', (req, res) => {
   const serverUrl = `${req.protocol}://${req.get('host')}`;
@@ -66,9 +94,7 @@ router.get('/embed.js', (req, res) => {
 
   function initWidget(config) {
     var theme = {};
-    try {
-      theme = JSON.parse(config.widgetTheme || '{}');
-    } catch(e) {}
+    try { theme = JSON.parse(config.widgetTheme || '{}'); } catch(e) {}
 
     var templates = {
       minimal: {
@@ -94,6 +120,18 @@ router.get('/embed.js', (req, res) => {
         borderRadius: '18px',
         boxShadow: '0 10px 30px rgba(99, 102, 241, 0.15)',
         fontFamily: 'system-ui, -apple-system, sans-serif'
+      },
+      hubspot_default: {
+        primaryColor: '#ff7a59',
+        headerBg: '#1a1a2e',
+        headerText: '#ffffff',
+        userBubbleBg: '#ff7a59',
+        userBubbleText: '#ffffff',
+        botBubbleBg: '#f0f0f0',
+        botBubbleText: '#1a1a2e',
+        borderRadius: '16px',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
       },
       corporate: {
         primaryColor: '#0f172a',
@@ -137,7 +175,9 @@ router.get('/embed.js', (req, res) => {
     var preset = templates[templateId] || templates.modern_gradient;
 
     var activePrimaryColor = theme.primaryColor || config.primaryColor || preset.primaryColor;
-    var activeHeaderBg = theme.headerBg || activePrimaryColor;
+    var activeHeaderBg = (templateId === 'modern_gradient')
+      ? 'linear-gradient(135deg, ' + (theme.primaryColor || '#6366f1') + ' 0%, ' + (theme.secondaryColor || '#a855f7') + ' 100%)'
+      : (theme.headerBg || preset.headerBg);
     var activeUserBubbleBg = theme.userBubbleColor || activePrimaryColor;
     var activeBotBubbleBg = theme.botBubbleColor || preset.botBubbleBg;
     var activeBorderRadius = preset.borderRadius;
@@ -145,6 +185,7 @@ router.get('/embed.js', (req, res) => {
     var activeLogo = theme.logoUrl || '';
     var activeLauncherIcon = theme.launcherIconUrl || '';
     var activeStarterQuestions = theme.starterQuestions || [];
+    var isDark = templateId === 'dark_mode';
 
     // Premium Widget Customizations
     var activeBotAvatar = theme.botAvatarUrl || '';
@@ -153,218 +194,389 @@ router.get('/embed.js', (req, res) => {
     var calloutDelay = parseInt(theme.calloutDelay) || 3;
     var disclaimerText = theme.disclaimerText || '';
 
+    // Privacy Policy
+    var privacyText = theme.privacyPolicyText || '';
+    var privacyUrl = theme.privacyPolicyUrl || '';
+    var privacyBannerKey = 'cb_privacy_dismissed_' + (config.id || 'default');
+
+    // Feedback Survey
+    var feedbackEnabled = theme.feedbackEnabled !== false;
+    var feedbackBadUrl = theme.feedbackBadUrl || '';
+    var feedbackNeutralUrl = theme.feedbackNeutralUrl || '';
+    var feedbackGoodUrl = theme.feedbackGoodUrl || '';
+    var feedbackShown = false;
+
     var position = config.position || 'bottom-right';
     var posRight = position.includes('right') ? '20px' : 'auto';
     var posLeft = position.includes('left') ? '20px' : 'auto';
 
+    // ── CSS ─────────────────────────────────────────────────────────────────────
     var style = document.createElement('style');
     style.textContent =
-      ':root {' +
-      '  --cb-primary: ' + activePrimaryColor + ';' +
-      '  --cb-header-bg: ' + activeHeaderBg + ';' +
-      '  --cb-header-text: ' + preset.headerText + ';' +
-      '  --cb-user-bubble-bg: ' + activeUserBubbleBg + ';' +
-      '  --cb-user-bubble-text: ' + preset.userBubbleText + ';' +
-      '  --cb-bot-bubble-bg: ' + activeBotBubbleBg + ';' +
-      '  --cb-bot-bubble-text: ' + preset.botBubbleText + ';' +
-      '  --cb-border-radius: ' + activeBorderRadius + ';' +
-      '  --cb-font: ' + activeFont + ';' +
-      '  --cb-box-shadow: ' + preset.boxShadow + ';' +
+      ':root{' +
+      '--cb-primary:' + activePrimaryColor + ';' +
+      '--cb-header-bg:' + activeHeaderBg + ';' +
+      '--cb-header-text:' + preset.headerText + ';' +
+      '--cb-user-bg:' + activeUserBubbleBg + ';' +
+      '--cb-user-text:' + preset.userBubbleText + ';' +
+      '--cb-bot-bg:' + activeBotBubbleBg + ';' +
+      '--cb-bot-text:' + preset.botBubbleText + ';' +
+      '--cb-radius:' + activeBorderRadius + ';' +
+      '--cb-font:' + activeFont + ';' +
+      '--cb-shadow:' + preset.boxShadow + ';' +
       '}' +
-      '.cb-btn{position:fixed;bottom:20px;right:'+posRight+';left:'+posLeft+';width:60px;height:60px;border-radius:50%;background:var(--cb-primary);border:none;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,.15);z-index:99998;display:flex;align-items:center;justify-content:center;transition:transform .3s,box-shadow .3s;padding:0}' +
-      '.cb-btn:hover{transform:scale(1.1);box-shadow:0 6px 25px rgba(0,0,0,.2)}' +
+      // Launcher button
+      '.cb-btn{position:fixed;bottom:20px;right:' + posRight + ';left:' + posLeft + ';width:60px;height:60px;border-radius:50%;background:var(--cb-primary);border:none;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,.2);z-index:99998;display:flex;align-items:center;justify-content:center;transition:transform .3s,box-shadow .3s;padding:0}' +
+      '.cb-btn:hover{transform:scale(1.08);box-shadow:0 8px 28px rgba(0,0,0,.25)}' +
       '.cb-btn svg{width:28px;height:28px;fill:#fff}' +
-      '.cb-box{position:fixed;bottom:90px;right:'+posRight+';left:'+posLeft+';width:380px;max-width:calc(100vw - 40px);height:520px;max-height:calc(100vh - 120px);background:#fff;border-radius:var(--cb-border-radius);box-shadow:var(--cb-box-shadow);z-index:99999;display:none;flex-direction:column;overflow:hidden;font-family:var(--cb-font)}' +
-      '.cb-box.open{display:flex;animation:cb-up .3s ease}' +
-      '@keyframes cb-up{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}' +
-      '.cb-hdr{background:var(--cb-header-bg);color:var(--cb-header-text);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(0,0,0,0.05)}' +
-      '.cb-hdr-t{font-size:16px;font-weight:600}' +
-      '.cb-hdr-x{background:none;border:none;color:inherit;cursor:pointer;font-size:20px;padding:0 4px;opacity:.8}' +
+      // Widget box
+      '.cb-box{position:fixed;bottom:90px;right:' + posRight + ';left:' + posLeft + ';width:380px;max-width:calc(100vw - 40px);height:560px;max-height:calc(100vh - 120px);background:' + (isDark ? '#1e293b' : '#fff') + ';border-radius:var(--cb-radius);box-shadow:var(--cb-shadow);z-index:99999;display:none;flex-direction:column;overflow:hidden;font-family:var(--cb-font)}' +
+      '.cb-box.open{display:flex;animation:cb-up .28s cubic-bezier(.22,.68,0,1.2)}' +
+      '@keyframes cb-up{from{opacity:0;transform:translateY(24px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}' +
+      // Header
+      '.cb-hdr{background:var(--cb-header-bg);color:var(--cb-header-text);padding:14px 18px;display:flex;align-items:center;gap:10px;flex-shrink:0}' +
+      '.cb-hdr-av{width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.25);flex-shrink:0}' +
+      '.cb-hdr-av-fb{width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--cb-header-text);flex-shrink:0}' +
+      '.cb-hdr-info{flex:1;min-width:0}' +
+      '.cb-hdr-name{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '.cb-hdr-sub{font-size:11px;opacity:.7;margin-top:1px;display:flex;align-items:center;gap:4px}' +
+      '.cb-hdr-dot{width:7px;height:7px;background:#22c55e;border-radius:50%;display:inline-block}' +
+      '.cb-hdr-x{background:none;border:none;color:var(--cb-header-text);cursor:pointer;font-size:22px;padding:0 2px;opacity:.7;line-height:1;margin-left:auto;flex-shrink:0}' +
       '.cb-hdr-x:hover{opacity:1}' +
-      '.cb-msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;background:' + (templateId === 'dark_mode' ? '#1e293b' : '#fff') + '}' +
-      '.cb-msg-row{display:flex;align-items:flex-end;gap:8px;width:100%;animation:cb-up .2s ease}' +
-      '.cb-msg-row.user{justify-content:flex-end}' +
-      '.cb-msg-row.bot{justify-content:flex-start}' +
-      '.cb-msg-avatar{width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0}' +
-      '.cb-m{max-width:75%;padding:10px 14px;border-radius:var(--cb-border-radius);font-size:14px;line-height:1.5;word-wrap:break-word;white-space:pre-wrap}' +
-      '.cb-m.user{background:var(--cb-user-bubble-bg);color:var(--cb-user-bubble-text);border-bottom-right-radius:4px}' +
-      '.cb-m.bot{background:var(--cb-bot-bubble-bg);color:var(--cb-bot-bubble-text);border-bottom-left-radius:4px}' +
-      '.cb-typing-indicator{display:flex;align-items:center;gap:4px;padding:6px 10px;height:12px}' +
-      '.cb-typing-dot{width:6px;height:6px;background:currentColor;border-radius:50%;opacity:.4;animation:cb-bounce 1.4s infinite both}' +
-      '.cb-typing-dot:nth-child(2){animation-delay:.2s}' +
-      '.cb-typing-dot:nth-child(3){animation-delay:.4s}' +
-      '@keyframes cb-bounce{0%,80%,100%{transform:scale(0.6);opacity:.4}40%{transform:scale(1);opacity:1}}' +
-      '.cb-callout{position:fixed;bottom:90px;right:'+posRight+';left:'+posLeft+';background:#fff;color:#0f172a;padding:10px 14px;border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:99997;font-size:13px;font-family:var(--cb-font);max-width:250px;display:flex;align-items:center;gap:8px;border:1px solid #e2e8f0;cursor:pointer;animation:cb-up .3s ease}' +
-      '.cb-callout-close{background:none;border:none;color:#94a3b8;cursor:pointer;font-size:14px;padding:0;margin-left:auto;line-height:1}' +
-      '.cb-callout-close:hover{color:#64748b}' +
-      '.cb-disclaimer{font-size:10px;color:#94a3b8;text-align:center;padding:4px 16px 8px;background:none;font-family:inherit}' +
-      '.cb-inp{flex:1;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;font-size:14px;outline:none;resize:none;font-family:inherit;background:' + (templateId === 'dark_mode' ? '#1e293b' : '#fff') + ';color:' + (templateId === 'dark_mode' ? '#f8fafc' : '#1e293b') + '}' +
-      '.cb-inp:focus{border-color:var(--cb-primary);box-shadow:0 0 0 2px var(--cb-primary)20}' +
-      '.cb-snd{background:var(--cb-primary);border:none;border-radius:8px;padding:10px 16px;cursor:pointer;display:flex;align-items:center;justify-content:center}' +
-      '.cb-snd:disabled{opacity:.5;cursor:not-allowed}' +
+      // Messages
+      '.cb-msgs{flex:1;overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:10px;background:' + (isDark ? '#1e293b' : '#f8fafc') + ';scroll-behavior:smooth}' +
+      '.cb-msgs::-webkit-scrollbar{width:4px}.cb-msgs::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:4px}' +
+      '.cb-row{display:flex;align-items:flex-end;gap:8px;width:100%;animation:cb-up .2s ease}' +
+      '.cb-row.user{justify-content:flex-end}' +
+      '.cb-row.bot{justify-content:flex-start}' +
+      '.cb-av{width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1px solid rgba(0,0,0,.06)}' +
+      '.cb-av-fb{width:28px;height:28px;border-radius:50%;background:var(--cb-primary);display:flex;align-items:center;justify-content:center;color:#fff;font-size:9px;font-weight:700;flex-shrink:0}' +
+      '.cb-bubble-wrap{display:flex;flex-direction:column;max-width:75%;gap:3px}' +
+      '.cb-row.user .cb-bubble-wrap{align-items:flex-end}' +
+      '.cb-m{padding:10px 14px;border-radius:var(--cb-radius);font-size:14px;line-height:1.55;word-wrap:break-word;white-space:pre-wrap;border-bottom-left-radius:4px}' +
+      '.cb-m.user{background:var(--cb-user-bg);color:var(--cb-user-text);border-bottom-left-radius:var(--cb-radius);border-bottom-right-radius:4px}' +
+      '.cb-m.bot{background:' + (isDark ? '#334155' : '#fff') + ';color:var(--cb-bot-text);box-shadow:0 1px 3px rgba(0,0,0,.07)}' +
+      // Timestamp
+      '.cb-ts{font-size:10px;color:' + (isDark ? '#64748b' : '#94a3b8') + ';padding:0 2px;letter-spacing:.2px}' +
+      // Typing dots
+      '.cb-typing{display:flex;align-items:center;gap:4px;padding:8px 12px}' +
+      '.cb-dot{width:7px;height:7px;background:' + (isDark ? '#64748b' : '#cbd5e1') + ';border-radius:50%;animation:cb-bounce 1.4s infinite both}' +
+      '.cb-dot:nth-child(2){animation-delay:.2s}' +
+      '.cb-dot:nth-child(3){animation-delay:.4s}' +
+      '@keyframes cb-bounce{0%,80%,100%{transform:scale(.6);opacity:.5}40%{transform:scale(1.1);opacity:1}}' +
+      // Chips
+      '.cb-chips{display:flex;flex-wrap:wrap;gap:6px;padding:2px 0 2px 36px}' +
+      '.cb-chip{background:' + (isDark ? '#334155' : '#fff') + ';color:var(--cb-primary);border:1.5px solid var(--cb-primary);padding:6px 13px;border-radius:20px;font-size:12.5px;cursor:pointer;transition:all .18s;font-family:inherit;font-weight:500}' +
+      '.cb-chip:hover{background:var(--cb-primary);color:#fff;transform:translateY(-1px)}' +
+      // Privacy banner
+      '.cb-privacy{background:' + (isDark ? '#1e3a5f' : '#fff9e6') + ';border-top:1px solid ' + (isDark ? '#2d4a6e' : '#fde68a') + ';padding:10px 14px;font-size:11.5px;color:' + (isDark ? '#93c5fd' : '#78350f') + ';display:flex;align-items:flex-start;gap:8px;flex-shrink:0;line-height:1.5}' +
+      '.cb-privacy a{color:var(--cb-primary);font-weight:600;text-decoration:underline}' +
+      '.cb-privacy-x{background:none;border:none;color:inherit;cursor:pointer;font-size:15px;padding:0;margin-left:auto;opacity:.6;flex-shrink:0;line-height:1}' +
+      '.cb-privacy-x:hover{opacity:1}' +
+      // Input area
+      '.cb-in-wrap{border-top:1px solid ' + (isDark ? '#334155' : '#e2e8f0') + ';background:' + (isDark ? '#0f172a' : '#fff') + ';flex-shrink:0}' +
+      '.cb-in{display:flex;gap:8px;padding:12px 14px 10px;align-items:flex-end}' +
+      '.cb-inp{flex:1;border:1.5px solid ' + (isDark ? '#334155' : '#e2e8f0') + ';border-radius:10px;padding:9px 13px;font-size:14px;outline:none;resize:none;font-family:inherit;background:' + (isDark ? '#1e293b' : '#f8fafc') + ';color:' + (isDark ? '#f1f5f9' : '#1e293b') + ';transition:border-color .2s,box-shadow .2s;line-height:1.4;max-height:90px;overflow-y:auto}' +
+      '.cb-inp:focus{border-color:var(--cb-primary);box-shadow:0 0 0 3px ' + activePrimaryColor + '22;background:' + (isDark ? '#1e293b' : '#fff') + '}' +
+      '.cb-inp::placeholder{color:' + (isDark ? '#64748b' : '#94a3b8') + '}' +
+      '.cb-snd{background:var(--cb-primary);border:none;border-radius:10px;width:40px;height:40px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:transform .15s,opacity .15s}' +
+      '.cb-snd:hover{transform:scale(1.07)}' +
+      '.cb-snd:disabled{opacity:.45;cursor:not-allowed;transform:none}' +
       '.cb-snd svg{width:18px;height:18px;fill:#fff}' +
-      '.cb-chip{background:' + (templateId === 'dark_mode' ? '#334155' : '#f1f5f9') + ';color:var(--cb-primary);border:1px solid ' + (templateId === 'dark_mode' ? '#475569' : '#e2e8f0') + ';padding:6px 12px;border-radius:16px;font-size:12px;cursor:pointer;transition:background 0.2s, transform 0.1s;font-family:inherit;font-weight:500;text-align:left}' +
-      '.cb-chip:hover{background:' + (templateId === 'dark_mode' ? '#475569' : '#e2e8f0') + ';transform:translateY(-1px)}' +
-      '@media(max-width:480px){.cb-box{width:calc(100vw - 20px);height:calc(100vh - 100px);right:10px;left:10px;bottom:80px}}';
+      '.cb-disclaimer{font-size:10px;color:' + (isDark ? '#64748b' : '#94a3b8') + ';text-align:center;padding:0 14px 9px}' +
+      // Callout bubble
+      '.cb-callout{position:fixed;bottom:92px;right:' + posRight + ';left:' + posLeft + ';background:#fff;color:#0f172a;padding:11px 15px;border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.14);z-index:99997;font-size:13px;font-family:var(--cb-font);max-width:260px;display:flex;align-items:center;gap:8px;border:1px solid #e2e8f0;cursor:pointer;animation:cb-up .3s ease;line-height:1.4}' +
+      '.cb-callout-x{background:none;border:none;color:#94a3b8;cursor:pointer;font-size:15px;padding:0;margin-left:auto;line-height:1}' +
+      '.cb-callout-x:hover{color:#64748b}' +
+      // Feedback card
+      '.cb-feedback{background:' + (isDark ? '#1e293b' : '#fff') + ';border:1px solid ' + (isDark ? '#334155' : '#e2e8f0') + ';border-radius:14px;padding:18px 16px;margin:4px 0;box-shadow:0 2px 12px rgba(0,0,0,.08);animation:cb-up .25s ease}' +
+      '.cb-feedback-title{font-size:14px;font-weight:700;color:' + (isDark ? '#f1f5f9' : '#1e293b') + ';margin-bottom:4px}' +
+      '.cb-feedback-sub{font-size:12px;color:' + (isDark ? '#94a3b8' : '#64748b') + ';margin-bottom:14px}' +
+      '.cb-fb-opts{display:flex;gap:10px;justify-content:center}' +
+      '.cb-fb-btn{display:flex;flex-direction:column;align-items:center;gap:6px;background:none;border:1.5px solid ' + (isDark ? '#334155' : '#e2e8f0') + ';border-radius:12px;padding:12px 16px;cursor:pointer;transition:all .2s;min-width:72px;font-family:inherit}' +
+      '.cb-fb-btn:hover{border-color:var(--cb-primary);background:' + activePrimaryColor + '10;transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.1)}' +
+      '.cb-fb-btn.selected{border-color:var(--cb-primary);background:var(--cb-primary);color:#fff}' +
+      '.cb-fb-btn.selected .cb-fb-label{color:#fff}' +
+      '.cb-fb-icon{width:32px;height:32px;object-fit:contain}' +
+      '.cb-fb-icon-svg{width:32px;height:32px}' +
+      '.cb-fb-label{font-size:11px;font-weight:600;color:' + (isDark ? '#94a3b8' : '#64748b') + ';text-align:center;line-height:1.3}' +
+      '.cb-fb-thanks{text-align:center;padding:8px 0;font-size:13px;color:' + (isDark ? '#86efac' : '#16a34a') + ';font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px}' +
+      // Stars (5-star rating fallback)
+      '.cb-stars{display:flex;gap:4px;justify-content:center}' +
+      '.cb-star{width:28px;height:28px;cursor:pointer;transition:transform .15s}' +
+      '.cb-star:hover{transform:scale(1.2)}' +
+      '.cb-star path{fill:#e2e8f0;transition:fill .15s}' +
+      '.cb-star.lit path{fill:#fbbf24}' +
+      '@media(max-width:480px){.cb-box{width:calc(100vw - 16px);height:calc(100vh - 90px);right:8px;left:8px;bottom:78px}.cb-btn{bottom:16px}}';
     document.head.appendChild(style);
 
+    // ── Launcher button ──────────────────────────────────────────────────────────
     var btn = document.createElement('button');
     btn.className = 'cb-btn';
-    
+    btn.setAttribute('aria-label', 'Open chat');
     if (activeLauncherIcon) {
       btn.innerHTML = '<img src="' + activeLauncherIcon + '" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" />';
     } else {
       btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>';
     }
-    btn.setAttribute('aria-label','Open chat');
     document.body.appendChild(btn);
 
+    // ── Widget box ───────────────────────────────────────────────────────────────
     var box = document.createElement('div');
     box.className = 'cb-box';
-    
-    var logoHtml = activeLogo ? '<img src="' + activeLogo + '" style="height:28px;width:28px;border-radius:50%;margin-right:10px;object-fit:cover;"/>' : '';
+
+    // Header avatar HTML
+    var hdrAvHtml = '';
+    if (activeLogo) {
+      hdrAvHtml = '<img class="cb-hdr-av" src="' + activeLogo + '" alt="logo"/>';
+    } else {
+      hdrAvHtml = '<div class="cb-hdr-av-fb">' + (config.name || 'AI').substring(0, 2).toUpperCase() + '</div>';
+    }
+
     var disclaimerHtml = disclaimerText ? '<div class="cb-disclaimer">' + disclaimerText + '</div>' : '';
 
     box.innerHTML =
       '<div class="cb-hdr">' +
-      '  <div style="display:flex;align-items:center;">' + logoHtml + '<span class="cb-hdr-t">' + (config.name||'Chat') + '</span></div>' +
-      '  <button class="cb-hdr-x">&times;</button>' +
+        hdrAvHtml +
+        '<div class="cb-hdr-info">' +
+          '<div class="cb-hdr-name">' + (config.name || 'Chat') + '</div>' +
+          '<div class="cb-hdr-sub"><span class="cb-hdr-dot"></span>Powered by AI</div>' +
+        '</div>' +
+        '<button class="cb-hdr-x" aria-label="Close">&times;</button>' +
       '</div>' +
       '<div class="cb-msgs"></div>' +
-      '<div class="cb-in-wrapper" style="border-top:1px solid #e2e8f0;background:' + (templateId === 'dark_mode' ? '#0f172a' : '#fff') + '">' +
-      '  <div class="cb-in" style="border-top:none;padding:12px 16px 8px;display:flex;gap:8px;"><input class="cb-inp" placeholder="Type a message..."/><button class="cb-snd"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button></div>' +
-      disclaimerHtml +
+      '<div class="cb-in-wrap">' +
+        (privacyText ? '<div class="cb-privacy" id="cb-privacy-banner"><span>' + privacyText + (privacyUrl ? ' <a href="' + privacyUrl + '" target="_blank" rel="noopener">privacy policy</a>.' : '') + '</span><button class="cb-privacy-x" title="Dismiss">&times;</button></div>' : '') +
+        '<div class="cb-in"><textarea class="cb-inp" rows="1" placeholder="Type a message\u2026"></textarea><button class="cb-snd"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button></div>' +
+        disclaimerHtml +
       '</div>';
+
     document.body.appendChild(box);
 
-    var msgs = box.querySelector('.cb-msgs');
-    var inp = box.querySelector('.cb-inp');
-    var snd = box.querySelector('.cb-snd');
-    var cls = box.querySelector('.cb-hdr-x');
+    var msgs  = box.querySelector('.cb-msgs');
+    var inp   = box.querySelector('.cb-inp');
+    var snd   = box.querySelector('.cb-snd');
+    var cls   = box.querySelector('.cb-hdr-x');
     var isOpen = false, isSending = false;
 
-    addMsg(config.welcomeMessage || 'Hello! How can I help you?', 'bot');
+    // Auto-resize textarea
+    inp.addEventListener('input', function() {
+      inp.style.height = 'auto';
+      inp.style.height = Math.min(inp.scrollHeight, 90) + 'px';
+    });
 
-    // Add starter questions as clickable chips below the welcome message
-    if (activeStarterQuestions && activeStarterQuestions.length > 0) {
-      var chipsContainer = document.createElement('div');
-      chipsContainer.className = 'cb-chips-container';
-      chipsContainer.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-top:4px;padding-left:36px;width:100%;';
-      
-      activeStarterQuestions.forEach(function(question) {
-        var chip = document.createElement('button');
-        chip.className = 'cb-chip';
-        chip.textContent = question;
-        chip.onclick = function() {
-          inp.value = question;
-          sendMsg();
-          chipsContainer.remove();
+    // Privacy banner dismiss
+    var privacyBanner = box.querySelector('#cb-privacy-banner');
+    if (privacyBanner) {
+      if (localStorage.getItem(privacyBannerKey)) {
+        privacyBanner.style.display = 'none';
+      } else {
+        privacyBanner.querySelector('.cb-privacy-x').onclick = function() {
+          privacyBanner.style.display = 'none';
+          localStorage.setItem(privacyBannerKey, '1');
         };
-        chipsContainer.appendChild(chip);
-      });
-      msgs.appendChild(chipsContainer);
+      }
     }
 
-    // Callout Notification Bubble
+    // ── Helpers ──────────────────────────────────────────────────────────────────
+    function nowTime() {
+      var d = new Date();
+      var h = d.getHours(), m = d.getMinutes();
+      var ampm = h >= 12 ? 'PM' : 'AM';
+      h = h % 12 || 12;
+      return h + ':' + (m < 10 ? '0' + m : m) + ' ' + ampm;
+    }
+
+    function makeBotAvatar() {
+      if (activeBotAvatar) {
+        var img = document.createElement('img');
+        img.className = 'cb-av';
+        img.src = activeBotAvatar;
+        img.alt = 'bot';
+        return img;
+      }
+      var fb = document.createElement('div');
+      fb.className = 'cb-av-fb';
+      fb.textContent = (config.name || 'AI').substring(0, 2).toUpperCase();
+      return fb;
+    }
+
+    function addMsg(text, role) {
+      var row = document.createElement('div');
+      row.className = 'cb-row ' + role;
+
+      var wrap = document.createElement('div');
+      wrap.className = 'cb-bubble-wrap';
+
+      var bubble = document.createElement('div');
+      bubble.className = 'cb-m ' + role;
+      bubble.textContent = text;
+
+      var ts = document.createElement('span');
+      ts.className = 'cb-ts';
+      ts.textContent = nowTime();
+
+      wrap.appendChild(bubble);
+      wrap.appendChild(ts);
+
+      if (role === 'bot') {
+        row.appendChild(makeBotAvatar());
+        row.appendChild(wrap);
+      } else {
+        row.appendChild(wrap);
+      }
+
+      msgs.appendChild(row);
+      msgs.scrollTop = msgs.scrollHeight;
+      return bubble;
+    }
+
+    // ── Welcome message ───────────────────────────────────────────────────────────
+    addMsg(config.welcomeMessage || 'Hello! How can I help you?', 'bot');
+
+    // Starter chips
+    if (activeStarterQuestions && activeStarterQuestions.length > 0) {
+      var chipsEl = document.createElement('div');
+      chipsEl.className = 'cb-chips';
+      activeStarterQuestions.forEach(function(q) {
+        var c = document.createElement('button');
+        c.className = 'cb-chip';
+        c.textContent = q;
+        c.onclick = function() { inp.value = q; sendMsg(); chipsEl.remove(); };
+        chipsEl.appendChild(c);
+      });
+      msgs.appendChild(chipsEl);
+    }
+
+    // ── Callout notification ───────────────────────────────────────────────────────
     if (calloutMsg && !localStorage.getItem('cb_callout_dismissed')) {
       setTimeout(function() {
         if (!isOpen) {
           var callout = document.createElement('div');
           callout.className = 'cb-callout';
-          callout.innerHTML = '<span>' + calloutMsg + '</span><button class="cb-callout-close">&times;</button>';
+          callout.innerHTML = '<span>' + calloutMsg + '</span><button class="cb-callout-x">&times;</button>';
           document.body.appendChild(callout);
-          
-          callout.querySelector('.cb-callout-close').onclick = function(e) {
+          callout.querySelector('.cb-callout-x').onclick = function(e) {
             e.stopPropagation();
             callout.remove();
             localStorage.setItem('cb_callout_dismissed', 'true');
           };
-          callout.onclick = function() {
-            callout.remove();
-            btn.click();
-          };
+          callout.onclick = function() { callout.remove(); btn.click(); };
         }
       }, calloutDelay * 1000);
     }
 
-    btn.onclick = function() { 
-      isOpen = !isOpen; 
-      box.classList.toggle('open', isOpen); 
-      if(isOpen) {
-        inp.focus(); 
-        var callout = document.querySelector('.cb-callout');
-        if (callout) callout.remove();
-      }
-    };
-    cls.onclick = function() { isOpen = false; box.classList.remove('open'); };
+    // ── Feedback card ─────────────────────────────────────────────────────────────
+    var GOODBYE_PATTERNS = /\\b(thank you|thanks|bye|goodbye|good bye|that.?s all|see you|all good|done|ok thanks|okay thanks|no more|i.?m good|i.?m done|cheers|great thanks|perfect thanks|that.?s it|that.?s enough|noted|got it thanks)\\b/i;
 
-    function addMsg(text, role) {
-      var row = document.createElement('div');
-      row.className = 'cb-msg-row ' + role;
+    function showFeedbackCard() {
+      if (feedbackShown || !feedbackEnabled) return;
+      feedbackShown = true;
 
-      if (role === 'bot') {
-        if (activeBotAvatar) {
-          var img = document.createElement('img');
-          img.className = 'cb-msg-avatar';
-          img.src = activeBotAvatar;
-          row.appendChild(img);
-        } else {
-          var placeholder = document.createElement('div');
-          placeholder.className = 'cb-msg-avatar';
-          placeholder.style.cssText = 'background:var(--cb-primary);width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:bold;';
-          placeholder.textContent = (config.name || 'AI').substring(0, 2).toUpperCase();
-          row.appendChild(placeholder);
-        }
+      var card = document.createElement('div');
+      card.className = 'cb-feedback';
+
+      var botName = config.name || 'us';
+
+      // Professional SVG icons (used if no custom URLs provided)
+      var svgBad = '<svg class="cb-fb-icon-svg" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="18" fill="#fee2e2" stroke="#fca5a5" stroke-width="1.5"/><circle cx="14" cy="16" r="2" fill="#ef4444"/><circle cx="26" cy="16" r="2" fill="#ef4444"/><path d="M13 28c0-3.866 3.134-7 7-7s7 3.134 7 7" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/></svg>';
+      var svgNeutral = '<svg class="cb-fb-icon-svg" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="18" fill="#fef9c3" stroke="#fde047" stroke-width="1.5"/><circle cx="14" cy="16" r="2" fill="#ca8a04"/><circle cx="26" cy="16" r="2" fill="#ca8a04"/><line x1="13" y1="27" x2="27" y2="27" stroke="#ca8a04" stroke-width="2" stroke-linecap="round"/></svg>';
+      var svgGood = '<svg class="cb-fb-icon-svg" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="18" fill="#dcfce7" stroke="#86efac" stroke-width="1.5"/><circle cx="14" cy="16" r="2" fill="#16a34a"/><circle cx="26" cy="16" r="2" fill="#16a34a"/><path d="M13 23c1.5 3 10.5 3 14 0" stroke="#16a34a" stroke-width="2" stroke-linecap="round"/></svg>';
+
+      function makeIconHtml(url, fallbackSvg) {
+        if (url) return '<img class="cb-fb-icon" src="' + url + '" alt="rating icon"/>';
+        return fallbackSvg;
       }
 
-      var m = document.createElement('div');
-      m.className = 'cb-m ' + role;
-      m.textContent = text;
-      row.appendChild(m);
-      msgs.appendChild(row);
+      card.innerHTML =
+        '<div class="cb-feedback-title">How was your experience?</div>' +
+        '<div class="cb-feedback-sub">Rate your chat with ' + botName + ' today</div>' +
+        '<div class="cb-fb-opts">' +
+          '<button class="cb-fb-btn" data-rating="1" data-label="Not Satisfied">' +
+            makeIconHtml(feedbackBadUrl, svgBad) +
+            '<span class="cb-fb-label">Not<br>Satisfied</span>' +
+          '</button>' +
+          '<button class="cb-fb-btn" data-rating="3" data-label="Neutral">' +
+            makeIconHtml(feedbackNeutralUrl, svgNeutral) +
+            '<span class="cb-fb-label">Neutral</span>' +
+          '</button>' +
+          '<button class="cb-fb-btn" data-rating="5" data-label="Satisfied">' +
+            makeIconHtml(feedbackGoodUrl, svgGood) +
+            '<span class="cb-fb-label">Satisfied</span>' +
+          '</button>' +
+        '</div>';
+
+      msgs.appendChild(card);
       msgs.scrollTop = msgs.scrollHeight;
-      return m;
+
+      card.querySelectorAll('.cb-fb-btn').forEach(function(b) {
+        b.onclick = function() {
+          var rating = b.getAttribute('data-rating');
+          var label  = b.getAttribute('data-label');
+          card.querySelectorAll('.cb-fb-btn').forEach(function(x) { x.classList.remove('selected'); });
+          b.classList.add('selected');
+          setTimeout(function() {
+            card.innerHTML = '<div class="cb-fb-thanks"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#dcfce7" stroke="#86efac" stroke-width="1.5"/><path d="M7 12l3 3 6-6" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Thanks for your feedback!</div>';
+            msgs.scrollTop = msgs.scrollHeight;
+          }, 500);
+          fetch(SERVER_URL + '/widget/feedback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId: sessionId, botId: config.id, rating: rating, label: label })
+          }).catch(function() {});
+        };
+      });
     }
 
+    // ── Send message ──────────────────────────────────────────────────────────────
     function sendMsg() {
       var text = inp.value.trim();
       if (!text || isSending) return;
-      
-      var chips = msgs.querySelector('.cb-chips-container');
+
+      var chips = msgs.querySelector('.cb-chips');
       if (chips) chips.remove();
 
-      addMsg(text, 'user');
+      // User bubble with timestamp
+      var userRow = document.createElement('div');
+      userRow.className = 'cb-row user';
+      var userWrap = document.createElement('div');
+      userWrap.className = 'cb-bubble-wrap';
+      var userBubble = document.createElement('div');
+      userBubble.className = 'cb-m user';
+      userBubble.textContent = text;
+      var userTs = document.createElement('span');
+      userTs.className = 'cb-ts';
+      userTs.textContent = nowTime();
+      userWrap.appendChild(userBubble);
+      userWrap.appendChild(userTs);
+      userRow.appendChild(userWrap);
+      msgs.appendChild(userRow);
+      msgs.scrollTop = msgs.scrollHeight;
+
       inp.value = '';
+      inp.style.height = 'auto';
       isSending = true;
       snd.disabled = true;
 
-      // Create bot message row with thinking animation
+      // Check goodbye BEFORE sending (to show feedback after AI responds)
+      var isGoodbye = GOODBYE_PATTERNS.test(text);
+
+      // Bot thinking row
       var botRow = document.createElement('div');
-      botRow.className = 'cb-msg-row bot';
-      
-      if (activeBotAvatar) {
-        var img = document.createElement('img');
-        img.className = 'cb-msg-avatar';
-        img.src = activeBotAvatar;
-        botRow.appendChild(img);
-      } else {
-        var placeholder = document.createElement('div');
-        placeholder.className = 'cb-msg-avatar';
-        placeholder.style.cssText = 'background:var(--cb-primary);width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:bold;';
-        placeholder.textContent = (config.name || 'AI').substring(0, 2).toUpperCase();
-        botRow.appendChild(placeholder);
-      }
-
-      var botMsg = document.createElement('div');
-      botMsg.className = 'cb-m bot';
-      
+      botRow.className = 'cb-row bot';
+      botRow.appendChild(makeBotAvatar());
+      var botWrap = document.createElement('div');
+      botWrap.className = 'cb-bubble-wrap';
+      var botBubble = document.createElement('div');
+      botBubble.className = 'cb-m bot';
       if (enableThinking) {
-        botMsg.innerHTML = '<div class="cb-typing-indicator"><div class="cb-typing-dot"></div><div class="cb-typing-dot"></div><div class="cb-typing-dot"></div></div>';
-      } else {
-        botMsg.textContent = '';
+        botBubble.innerHTML = '<div class="cb-typing"><div class="cb-dot"></div><div class="cb-dot"></div><div class="cb-dot"></div></div>';
       }
-
-      botRow.appendChild(botMsg);
+      var botTs = document.createElement('span');
+      botTs.className = 'cb-ts';
+      botWrap.appendChild(botBubble);
+      botWrap.appendChild(botTs);
+      botRow.appendChild(botWrap);
       msgs.appendChild(botRow);
       msgs.scrollTop = msgs.scrollHeight;
 
@@ -375,64 +587,77 @@ router.get('/embed.js', (req, res) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, sessionId: sessionId, botId: config.id, pageUrl: window.location.href })
       }).then(function(response) {
-        var reader = response.body.getReader();
+        var reader  = response.body.getReader();
         var decoder = new TextDecoder();
-        var buffer = '';
+        var buffer  = '';
 
         function read() {
           reader.read().then(function(result) {
             if (result.done) {
+              botTs.textContent = nowTime();
               isSending = false;
               snd.disabled = false;
+              if (isGoodbye) setTimeout(showFeedbackCard, 900);
               return;
             }
             buffer += decoder.decode(result.value, { stream: true });
             var lines = buffer.split('\\n');
             buffer = lines.pop() || '';
-
             for (var i = 0; i < lines.length; i++) {
               var line = lines[i].trim();
               if (!line || line.indexOf('data: ') !== 0) continue;
               try {
                 var data = JSON.parse(line.slice(6));
                 if (data.type === 'chunk') {
-                  if (isFirstToken) {
-                    botMsg.innerHTML = '';
-                    isFirstToken = false;
-                  }
-                  botMsg.textContent += data.content;
+                  if (isFirstToken) { botBubble.innerHTML = ''; isFirstToken = false; }
+                  botBubble.textContent += data.content;
                   msgs.scrollTop = msgs.scrollHeight;
                 } else if (data.type === 'start' && data.sessionId) {
                   sessionId = data.sessionId;
                   localStorage.setItem(sessionKey, sessionId);
                 } else if (data.type === 'error') {
-                  if (isFirstToken) botMsg.innerHTML = '';
-                  botMsg.textContent = 'Sorry, something went wrong.';
+                  if (isFirstToken) botBubble.innerHTML = '';
+                  botBubble.textContent = 'Sorry, something went wrong.';
                 }
               } catch(e) {}
             }
             read();
           }).catch(function() {
-            if (isFirstToken) botMsg.innerHTML = '';
-            if (!botMsg.textContent) botMsg.textContent = 'Connection error. Please try again.';
+            if (isFirstToken) botBubble.innerHTML = '';
+            if (!botBubble.textContent) botBubble.textContent = 'Connection error. Please try again.';
+            botTs.textContent = nowTime();
             isSending = false;
             snd.disabled = false;
           });
         }
         read();
       }).catch(function() {
-        if (isFirstToken) botMsg.innerHTML = '';
-        botMsg.textContent = 'Connection error. Please try again.';
+        if (isFirstToken) botBubble.innerHTML = '';
+        botBubble.textContent = 'Connection error. Please try again.';
+        botTs.textContent = nowTime();
         isSending = false;
         snd.disabled = false;
       });
     }
 
+    // ── Controls ─────────────────────────────────────────────────────────────────
+    btn.onclick = function() {
+      isOpen = !isOpen;
+      box.classList.toggle('open', isOpen);
+      if (isOpen) {
+        inp.focus();
+        var callout = document.querySelector('.cb-callout');
+        if (callout) callout.remove();
+      }
+    };
+    cls.onclick = function() { isOpen = false; box.classList.remove('open'); };
+
     snd.onclick = sendMsg;
-    inp.onkeypress = function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } };
+    inp.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); }
+    });
   }
 })();
-
 `;
 
   res.setHeader('Content-Type', 'application/javascript');
