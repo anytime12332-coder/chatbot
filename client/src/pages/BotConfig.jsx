@@ -111,25 +111,51 @@ function WidgetPreview({ config, theme }) {
           gap: 8,
         }}
       >
-        {/* Bot welcome bubble */}
-        <div
-          style={{
-            background: botBg,
-            color: botText,
-            padding: '8px 12px',
-            borderRadius: 12,
-            borderBottomLeftRadius: 4,
-            fontSize: 12,
-            maxWidth: '80%',
-            alignSelf: 'flex-start',
-          }}
-        >
-          {config.welcomeMessage || 'Hello! How can I help you today?'}
+        {/* Bot welcome row */}
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, width: '100%' }}>
+          {theme.botAvatarUrl ? (
+            <img
+              src={theme.botAvatarUrl}
+              alt="Avatar"
+              style={{ width: 22, height: 22, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+            />
+          ) : (
+            <div
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: '50%',
+                background: primary,
+                color: '#fff',
+                fontSize: 8,
+                fontWeight: 'bold',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              {(config.name || 'AI').substring(0, 2).toUpperCase()}
+            </div>
+          )}
+          <div
+            style={{
+              background: botBg,
+              color: botText,
+              padding: '8px 12px',
+              borderRadius: 12,
+              borderBottomLeftRadius: 4,
+              fontSize: 12,
+              maxWidth: '75%',
+            }}
+          >
+            {config.welcomeMessage || 'Hello! How can I help you today?'}
+          </div>
         </div>
 
         {/* Starter chips */}
         {starterQs.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 4 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 28 }}>
             {starterQs.map((q, i) => (
               <button
                 key={i}
@@ -152,6 +178,55 @@ function WidgetPreview({ config, theme }) {
           </div>
         )}
 
+        {/* Thinking indicator preview */}
+        {theme.enableThinkingAnimation !== false && (
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, width: '100%', marginTop: 2 }}>
+            {theme.botAvatarUrl ? (
+              <img
+                src={theme.botAvatarUrl}
+                alt="Avatar"
+                style={{ width: 22, height: 22, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: '50%',
+                  background: primary,
+                  color: '#fff',
+                  fontSize: 8,
+                  fontWeight: 'bold',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                {(config.name || 'AI').substring(0, 2).toUpperCase()}
+              </div>
+            )}
+            <div
+              style={{
+                background: botBg,
+                color: botText,
+                padding: '6px 10px',
+                borderRadius: 12,
+                borderBottomLeftRadius: 4,
+                fontSize: 12,
+                maxWidth: '75%',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 3,
+              }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce"></span>
+              <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0.2s' }}></span>
+              <span className="w-1.5 h-1.5 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0.4s' }}></span>
+            </div>
+          </div>
+        )}
+
         {/* User bubble */}
         <div
           style={{
@@ -170,47 +245,59 @@ function WidgetPreview({ config, theme }) {
       </div>
 
       {/* Input area */}
-      <div
-        style={{
-          background: isDark ? '#0f172a' : '#fff',
-          borderTop: `1px solid ${isDark ? '#1e293b' : '#e2e8f0'}`,
-          padding: '8px 10px',
-          display: 'flex',
-          gap: 6,
-          alignItems: 'center',
-        }}
-      >
+      <div style={{ borderTop: `1px solid ${isDark ? '#1e293b' : '#e2e8f0'}`, background: isDark ? '#0f172a' : '#fff' }}>
         <div
           style={{
-            flex: 1,
-            background: isDark ? '#1e293b' : '#f8fafc',
-            border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
-            borderRadius: 8,
-            height: 28,
-            fontSize: 11,
-            color: isDark ? '#94a3b8' : '#94a3b8',
+            padding: '8px 10px 4px',
             display: 'flex',
+            gap: 6,
             alignItems: 'center',
-            paddingLeft: 8,
           }}
         >
-          Type a message…
+          <div
+            style={{
+              flex: 1,
+              background: isDark ? '#1e293b' : '#f8fafc',
+              border: `1px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+              borderRadius: 8,
+              height: 28,
+              fontSize: 11,
+              color: '#94a3b8',
+              display: 'flex',
+              alignItems: 'center',
+              paddingLeft: 8,
+            }}
+          >
+            Type a message…
+          </div>
+          <div
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              background: primary,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <svg viewBox="0 0 24 24" width={14} height={14} fill="#fff">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+            </svg>
+          </div>
         </div>
-        <div
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: 8,
-            background: primary,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <svg viewBox="0 0 24 24" width={14} height={14} fill="#fff">
-            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-          </svg>
-        </div>
+        {theme.disclaimerText && (
+          <div
+            style={{
+              fontSize: 9,
+              color: '#94a3b8',
+              textAlign: 'center',
+              padding: '0 10px 6px',
+            }}
+          >
+            {theme.disclaimerText}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -236,6 +323,11 @@ export default function BotConfig() {
     userBubbleColor: '',
     botBubbleColor: '',
     starterQuestions: [],
+    botAvatarUrl: '',
+    enableThinkingAnimation: true,
+    calloutMessage: '',
+    calloutDelay: 3,
+    disclaimerText: '',
   });
 
   const [newChip, setNewChip] = useState('');
@@ -277,6 +369,11 @@ export default function BotConfig() {
         userBubbleColor: parsedTheme.userBubbleColor || '',
         botBubbleColor: parsedTheme.botBubbleColor || '',
         starterQuestions: parsedTheme.starterQuestions || [],
+        botAvatarUrl: parsedTheme.botAvatarUrl || '',
+        enableThinkingAnimation: parsedTheme.enableThinkingAnimation ?? true,
+        calloutMessage: parsedTheme.calloutMessage || '',
+        calloutDelay: parsedTheme.calloutDelay ?? 3,
+        disclaimerText: parsedTheme.disclaimerText || '',
       });
     } catch (err) {
       console.error('Load config error:', err);
@@ -551,7 +648,7 @@ export default function BotConfig() {
                   <Image className="w-4 h-4 inline-block mr-1.5 text-primary-500" />
                   Brand Assets (Image URLs)
                 </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">Header Logo URL</label>
                     <input
@@ -573,6 +670,17 @@ export default function BotConfig() {
                       placeholder="https://yoursite.com/chat-icon.png"
                     />
                     <p className="text-[11px] text-gray-400 mt-1">Replaces the default chat bubble icon</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Bot Message Avatar URL</label>
+                    <input
+                      type="url"
+                      value={theme.botAvatarUrl}
+                      onChange={e => updateTheme('botAvatarUrl', e.target.value)}
+                      className="input-field text-sm"
+                      placeholder="https://yoursite.com/avatar.png"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1">Avatar shown next to every bot message</p>
                   </div>
                 </div>
               </div>
@@ -686,9 +794,67 @@ export default function BotConfig() {
                     <Plus className="w-4 h-4" /> Add
                   </button>
                 </div>
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-gray-400 mt-1 mb-4">
                   Up to 5 chips. Press Enter or click Add. Users click one to auto-send it.
                 </p>
+              </div>
+
+              {/* Premium Add-ons Section */}
+              <div className="border-t border-gray-150 pt-4 space-y-4">
+                <label className="block text-sm font-semibold text-gray-800 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-indigo-500 animate-pulse" /> Premium Widget Add-ons
+                </label>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">First-Time Notification Callout Message</label>
+                    <textarea
+                      value={theme.calloutMessage}
+                      onChange={e => updateTheme('calloutMessage', e.target.value)}
+                      className="input-field text-sm"
+                      rows={2}
+                      placeholder="e.g. 'Hey there! Have any questions?'"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1">Appears above the widget launcher button to draw user attention</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Callout Delay (Seconds)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      value={theme.calloutDelay}
+                      onChange={e => updateTheme('calloutDelay', parseInt(e.target.value) || 3)}
+                      className="input-field text-sm"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1">How many seconds to wait before callout appears</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Input Disclaimer Text</label>
+                    <input
+                      type="text"
+                      value={theme.disclaimerText}
+                      onChange={e => updateTheme('disclaimerText', e.target.value)}
+                      className="input-field text-sm"
+                      placeholder="e.g. 'AI-generated. Verify important details.'"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1">Small warning/info message displayed below the input box</p>
+                  </div>
+                  <div className="flex items-center pt-5">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={theme.enableThinkingAnimation}
+                        onChange={e => updateTheme('enableThinkingAnimation', e.target.checked)}
+                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 h-4 w-4"
+                      />
+                      <span className="text-xs font-medium text-gray-600">Enable AI Thinking Animation</span>
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
 

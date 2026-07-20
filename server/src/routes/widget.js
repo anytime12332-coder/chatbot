@@ -146,6 +146,13 @@ router.get('/embed.js', (req, res) => {
     var activeLauncherIcon = theme.launcherIconUrl || '';
     var activeStarterQuestions = theme.starterQuestions || [];
 
+    // Premium Widget Customizations
+    var activeBotAvatar = theme.botAvatarUrl || '';
+    var enableThinking = theme.enableThinkingAnimation !== false;
+    var calloutMsg = theme.calloutMessage || '';
+    var calloutDelay = parseInt(theme.calloutDelay) || 3;
+    var disclaimerText = theme.disclaimerText || '';
+
     var position = config.position || 'bottom-right';
     var posRight = position.includes('right') ? '20px' : 'auto';
     var posLeft = position.includes('left') ? '20px' : 'auto';
@@ -175,11 +182,22 @@ router.get('/embed.js', (req, res) => {
       '.cb-hdr-x{background:none;border:none;color:inherit;cursor:pointer;font-size:20px;padding:0 4px;opacity:.8}' +
       '.cb-hdr-x:hover{opacity:1}' +
       '.cb-msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;background:' + (templateId === 'dark_mode' ? '#1e293b' : '#fff') + '}' +
-      '.cb-m{max-width:85%;padding:10px 14px;border-radius:var(--cb-border-radius);font-size:14px;line-height:1.5;word-wrap:break-word;white-space:pre-wrap}' +
-      '.cb-m.user{align-self:flex-end;background:var(--cb-user-bubble-bg);color:var(--cb-user-bubble-text);border-bottom-right-radius:4px}' +
-      '.cb-m.bot{align-self:flex-start;background:var(--cb-bot-bubble-bg);color:var(--cb-bot-bubble-text);border-bottom-left-radius:4px}' +
-      '.cb-m.typing{align-self:flex-start;background:var(--cb-bot-bubble-bg);color:var(--cb-bot-bubble-text);font-style:italic}' +
-      '.cb-in{padding:12px 16px;border-top:1px solid #e2e8f0;display:flex;gap:8px;background:' + (templateId === 'dark_mode' ? '#0f172a' : '#fff') + '}' +
+      '.cb-msg-row{display:flex;align-items:flex-end;gap:8px;width:100%;animation:cb-up .2s ease}' +
+      '.cb-msg-row.user{justify-content:flex-end}' +
+      '.cb-msg-row.bot{justify-content:flex-start}' +
+      '.cb-msg-avatar{width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0}' +
+      '.cb-m{max-width:75%;padding:10px 14px;border-radius:var(--cb-border-radius);font-size:14px;line-height:1.5;word-wrap:break-word;white-space:pre-wrap}' +
+      '.cb-m.user{background:var(--cb-user-bubble-bg);color:var(--cb-user-bubble-text);border-bottom-right-radius:4px}' +
+      '.cb-m.bot{background:var(--cb-bot-bubble-bg);color:var(--cb-bot-bubble-text);border-bottom-left-radius:4px}' +
+      '.cb-typing-indicator{display:flex;align-items:center;gap:4px;padding:6px 10px;height:12px}' +
+      '.cb-typing-dot{width:6px;height:6px;background:currentColor;border-radius:50%;opacity:.4;animation:cb-bounce 1.4s infinite both}' +
+      '.cb-typing-dot:nth-child(2){animation-delay:.2s}' +
+      '.cb-typing-dot:nth-child(3){animation-delay:.4s}' +
+      '@keyframes cb-bounce{0%,80%,100%{transform:scale(0.6);opacity:.4}40%{transform:scale(1);opacity:1}}' +
+      '.cb-callout{position:fixed;bottom:90px;right:'+posRight+';left:'+posLeft+';background:#fff;color:#0f172a;padding:10px 14px;border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:99997;font-size:13px;font-family:var(--cb-font);max-width:250px;display:flex;align-items:center;gap:8px;border:1px solid #e2e8f0;cursor:pointer;animation:cb-up .3s ease}' +
+      '.cb-callout-close{background:none;border:none;color:#94a3b8;cursor:pointer;font-size:14px;padding:0;margin-left:auto;line-height:1}' +
+      '.cb-callout-close:hover{color:#64748b}' +
+      '.cb-disclaimer{font-size:10px;color:#94a3b8;text-align:center;padding:4px 16px 8px;background:none;font-family:inherit}' +
       '.cb-inp{flex:1;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;font-size:14px;outline:none;resize:none;font-family:inherit;background:' + (templateId === 'dark_mode' ? '#1e293b' : '#fff') + ';color:' + (templateId === 'dark_mode' ? '#f8fafc' : '#1e293b') + '}' +
       '.cb-inp:focus{border-color:var(--cb-primary);box-shadow:0 0 0 2px var(--cb-primary)20}' +
       '.cb-snd{background:var(--cb-primary);border:none;border-radius:8px;padding:10px 16px;cursor:pointer;display:flex;align-items:center;justify-content:center}' +
@@ -205,14 +223,18 @@ router.get('/embed.js', (req, res) => {
     box.className = 'cb-box';
     
     var logoHtml = activeLogo ? '<img src="' + activeLogo + '" style="height:28px;width:28px;border-radius:50%;margin-right:10px;object-fit:cover;"/>' : '';
-    
+    var disclaimerHtml = disclaimerText ? '<div class="cb-disclaimer">' + disclaimerText + '</div>' : '';
+
     box.innerHTML =
       '<div class="cb-hdr">' +
       '  <div style="display:flex;align-items:center;">' + logoHtml + '<span class="cb-hdr-t">' + (config.name||'Chat') + '</span></div>' +
       '  <button class="cb-hdr-x">&times;</button>' +
       '</div>' +
       '<div class="cb-msgs"></div>' +
-      '<div class="cb-in"><input class="cb-inp" placeholder="Type a message..."/><button class="cb-snd"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button></div>';
+      '<div class="cb-in-wrapper" style="border-top:1px solid #e2e8f0;background:' + (templateId === 'dark_mode' ? '#0f172a' : '#fff') + '">' +
+      '  <div class="cb-in" style="border-top:none;padding:12px 16px 8px;display:flex;gap:8px;"><input class="cb-inp" placeholder="Type a message..."/><button class="cb-snd"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button></div>' +
+      disclaimerHtml +
+      '</div>';
     document.body.appendChild(box);
 
     var msgs = box.querySelector('.cb-msgs');
@@ -227,7 +249,7 @@ router.get('/embed.js', (req, res) => {
     if (activeStarterQuestions && activeStarterQuestions.length > 0) {
       var chipsContainer = document.createElement('div');
       chipsContainer.className = 'cb-chips-container';
-      chipsContainer.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-top:4px;padding-left:4px;width:100%;';
+      chipsContainer.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin-top:4px;padding-left:36px;width:100%;';
       
       activeStarterQuestions.forEach(function(question) {
         var chip = document.createElement('button');
@@ -236,21 +258,70 @@ router.get('/embed.js', (req, res) => {
         chip.onclick = function() {
           inp.value = question;
           sendMsg();
-          chipsContainer.remove(); // Remove starter question chips after click
+          chipsContainer.remove();
         };
         chipsContainer.appendChild(chip);
       });
       msgs.appendChild(chipsContainer);
     }
 
-    btn.onclick = function() { isOpen = !isOpen; box.classList.toggle('open', isOpen); if(isOpen) inp.focus(); };
+    // Callout Notification Bubble
+    if (calloutMsg && !localStorage.getItem('cb_callout_dismissed')) {
+      setTimeout(function() {
+        if (!isOpen) {
+          var callout = document.createElement('div');
+          callout.className = 'cb-callout';
+          callout.innerHTML = '<span>' + calloutMsg + '</span><button class="cb-callout-close">&times;</button>';
+          document.body.appendChild(callout);
+          
+          callout.querySelector('.cb-callout-close').onclick = function(e) {
+            e.stopPropagation();
+            callout.remove();
+            localStorage.setItem('cb_callout_dismissed', 'true');
+          };
+          callout.onclick = function() {
+            callout.remove();
+            btn.click();
+          };
+        }
+      }, calloutDelay * 1000);
+    }
+
+    btn.onclick = function() { 
+      isOpen = !isOpen; 
+      box.classList.toggle('open', isOpen); 
+      if(isOpen) {
+        inp.focus(); 
+        var callout = document.querySelector('.cb-callout');
+        if (callout) callout.remove();
+      }
+    };
     cls.onclick = function() { isOpen = false; box.classList.remove('open'); };
 
     function addMsg(text, role) {
+      var row = document.createElement('div');
+      row.className = 'cb-msg-row ' + role;
+
+      if (role === 'bot') {
+        if (activeBotAvatar) {
+          var img = document.createElement('img');
+          img.className = 'cb-msg-avatar';
+          img.src = activeBotAvatar;
+          row.appendChild(img);
+        } else {
+          var placeholder = document.createElement('div');
+          placeholder.className = 'cb-msg-avatar';
+          placeholder.style.cssText = 'background:var(--cb-primary);width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:bold;';
+          placeholder.textContent = (config.name || 'AI').substring(0, 2).toUpperCase();
+          row.appendChild(placeholder);
+        }
+      }
+
       var m = document.createElement('div');
       m.className = 'cb-m ' + role;
       m.textContent = text;
-      msgs.appendChild(m);
+      row.appendChild(m);
+      msgs.appendChild(row);
       msgs.scrollTop = msgs.scrollHeight;
       return m;
     }
@@ -259,7 +330,6 @@ router.get('/embed.js', (req, res) => {
       var text = inp.value.trim();
       if (!text || isSending) return;
       
-      // If chips container exists, remove it now that the user has started chatting
       var chips = msgs.querySelector('.cb-chips-container');
       if (chips) chips.remove();
 
@@ -268,14 +338,38 @@ router.get('/embed.js', (req, res) => {
       isSending = true;
       snd.disabled = true;
 
-      // Create bot message element for streaming
+      // Create bot message row with thinking animation
+      var botRow = document.createElement('div');
+      botRow.className = 'cb-msg-row bot';
+      
+      if (activeBotAvatar) {
+        var img = document.createElement('img');
+        img.className = 'cb-msg-avatar';
+        img.src = activeBotAvatar;
+        botRow.appendChild(img);
+      } else {
+        var placeholder = document.createElement('div');
+        placeholder.className = 'cb-msg-avatar';
+        placeholder.style.cssText = 'background:var(--cb-primary);width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:bold;';
+        placeholder.textContent = (config.name || 'AI').substring(0, 2).toUpperCase();
+        botRow.appendChild(placeholder);
+      }
+
       var botMsg = document.createElement('div');
       botMsg.className = 'cb-m bot';
-      botMsg.textContent = '';
-      msgs.appendChild(botMsg);
+      
+      if (enableThinking) {
+        botMsg.innerHTML = '<div class="cb-typing-indicator"><div class="cb-typing-dot"></div><div class="cb-typing-dot"></div><div class="cb-typing-dot"></div></div>';
+      } else {
+        botMsg.textContent = '';
+      }
+
+      botRow.appendChild(botMsg);
+      msgs.appendChild(botRow);
       msgs.scrollTop = msgs.scrollHeight;
 
-      // Use streaming endpoint
+      var isFirstToken = true;
+
       fetch(SERVER_URL + '/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -302,18 +396,24 @@ router.get('/embed.js', (req, res) => {
               try {
                 var data = JSON.parse(line.slice(6));
                 if (data.type === 'chunk') {
+                  if (isFirstToken) {
+                    botMsg.innerHTML = '';
+                    isFirstToken = false;
+                  }
                   botMsg.textContent += data.content;
                   msgs.scrollTop = msgs.scrollHeight;
                 } else if (data.type === 'start' && data.sessionId) {
                   sessionId = data.sessionId;
                   localStorage.setItem(sessionKey, sessionId);
                 } else if (data.type === 'error') {
+                  if (isFirstToken) botMsg.innerHTML = '';
                   botMsg.textContent = 'Sorry, something went wrong.';
                 }
               } catch(e) {}
             }
             read();
           }).catch(function() {
+            if (isFirstToken) botMsg.innerHTML = '';
             if (!botMsg.textContent) botMsg.textContent = 'Connection error. Please try again.';
             isSending = false;
             snd.disabled = false;
@@ -321,6 +421,7 @@ router.get('/embed.js', (req, res) => {
         }
         read();
       }).catch(function() {
+        if (isFirstToken) botMsg.innerHTML = '';
         botMsg.textContent = 'Connection error. Please try again.';
         isSending = false;
         snd.disabled = false;
