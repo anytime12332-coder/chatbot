@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import {
   Bot, Save, Building2, MessageSquare, Palette, Plus, Trash2,
   Image, Layout, Star, Sparkles, Moon, Briefcase, Layers,
-  Shield, MessageCircle, ThumbsUp
+  Shield, MessageCircle, ThumbsUp, Crown, Smartphone, Gem
 } from 'lucide-react';
 import api from '../lib/api';
 import { useBots } from '../context/BotContext';
@@ -47,6 +47,27 @@ const TEMPLATES = [
     Icon: Moon,
     preview: { from: '#0f172a', to: '#1e293b', bubble: '#334155', text: '#f8fafc' },
   },
+  {
+    id: 'premium_slate',
+    name: 'Premium Slate',
+    Icon: Crown,
+    badge: 'PRO',
+    preview: { from: '#0f172a', to: '#1e293b', bubble: '#ffffff', text: '#1e293b', userBg: '#0f172a' },
+  },
+  {
+    id: 'clean_ios',
+    name: 'Clean iOS',
+    Icon: Smartphone,
+    badge: 'PRO',
+    preview: { from: '#f7f7f8', to: '#e9e9eb', bubble: '#e9e9eb', text: '#1c1c1e', userBg: '#007AFF', headerText: '#1c1c1e' },
+  },
+  {
+    id: 'saas_elite',
+    name: 'SaaS Elite',
+    Icon: Gem,
+    badge: 'PRO',
+    preview: { from: '#5046e5', to: '#4338ca', bubble: '#f5f3ff', text: '#312e81', userBg: '#5046e5' },
+  },
 ];
 
 // ─── Live Widget Preview ──────────────────────────────────────────────────────
@@ -54,16 +75,125 @@ function WidgetPreview({ config, theme }) {
   const tpl = TEMPLATES.find(t => t.id === (theme.templateId || 'hubspot_default')) || TEMPLATES[0];
   const primary = theme.primaryColor || config.primaryColor || tpl.preview.from;
   const isHubspot = theme.templateId === 'hubspot_default';
+  const isCleanIos = theme.templateId === 'clean_ios';
   const headerBg = theme.templateId === 'modern_gradient'
     ? `linear-gradient(135deg, ${tpl.preview.from} 0%, ${tpl.preview.to} 100%)`
+    : theme.templateId === 'saas_elite'
+    ? `linear-gradient(180deg, ${tpl.preview.from} 0%, ${tpl.preview.to} 100%)`
     : isHubspot ? tpl.preview.from
     : (theme.headerBg || tpl.preview.from);
-  const userBg = theme.userBubbleColor || (isHubspot ? '#ff7a59' : primary);
+  const headerText = isCleanIos ? (tpl.preview.headerText || '#1c1c1e') : '#fff';
+  const userBg = theme.userBubbleColor || tpl.preview.userBg || (isHubspot ? '#ff7a59' : primary);
   const botBg = theme.botBubbleColor || tpl.preview.bubble;
   const botText = tpl.preview.text;
   const isDark = theme.templateId === 'dark_mode';
 
   const starterQs = (theme.starterQuestions || []).slice(0, 3);
+  const inputStyle = theme.inputStyle || 'floating_pill';
+
+  let inputWrapStyle = {
+    background: isDark ? '#0f172a' : '#fff',
+    borderTop: `1px solid ${isDark ? '#1e293b' : '#e2e8f0'}`,
+  };
+  let inputInnerStyle = {
+    padding: '8px 10px 4px',
+    display: 'flex',
+    gap: 6,
+    alignItems: 'center',
+  };
+  let inputFieldStyle = {
+    flex: 1,
+    background: isDark ? '#1e293b' : '#f8fafc',
+    border: `1.5px solid ${isDark ? '#334155' : '#e2e8f0'}`,
+    borderRadius: 10,
+    height: 30,
+    fontSize: 11,
+    color: '#94a3b8',
+    display: 'flex',
+    alignItems: 'center',
+    paddingLeft: 10,
+  };
+  let inputBtnStyle = {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    background: userBg,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  };
+  let inputSvgFill = '#fff';
+
+  if (inputStyle === 'floating_pill') {
+    inputWrapStyle = {
+      background: 'transparent',
+      borderTop: 'none',
+      padding: '8px 10px',
+    };
+    inputInnerStyle = {
+      background: isDark ? '#1e293b' : '#f3f4f8',
+      border: `1.5px solid ${isDark ? '#334155' : '#e5e7eb'}`,
+      borderRadius: 24,
+      padding: '4px 4px 4px 12px',
+      display: 'flex',
+      gap: 6,
+      alignItems: 'center',
+      boxShadow: '0 3px 12px rgba(0,0,0,0.04)',
+    };
+    inputFieldStyle = {
+      flex: 1,
+      background: 'transparent',
+      border: 'none',
+      height: 24,
+      fontSize: 11,
+      color: '#94a3b8',
+      display: 'flex',
+      alignItems: 'center',
+    };
+    inputBtnStyle = {
+      width: 26,
+      height: 26,
+      borderRadius: '50%',
+      background: userBg,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    };
+  } else if (inputStyle === 'minimal_borderless') {
+    inputWrapStyle = {
+      background: isDark ? '#0f172a' : '#fff',
+      borderTop: `1px solid ${isDark ? '#334155' : '#f0f0f5'}`,
+      padding: '10px 12px',
+    };
+    inputInnerStyle = {
+      display: 'flex',
+      gap: 6,
+      alignItems: 'center',
+    };
+    inputFieldStyle = {
+      flex: 1,
+      background: 'transparent',
+      border: 'none',
+      height: 24,
+      fontSize: 11,
+      color: '#94a3b8',
+      display: 'flex',
+      alignItems: 'center',
+    };
+    inputBtnStyle = {
+      width: 28,
+      height: 28,
+      borderRadius: '50%',
+      background: 'transparent',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    };
+    inputSvgFill = primary;
+  }
 
   return (
     <div
@@ -72,7 +202,7 @@ function WidgetPreview({ config, theme }) {
         borderRadius: theme.templateId === 'corporate' ? 0 : theme.templateId === 'playful' ? 24 : 16,
         overflow: 'hidden',
         boxShadow: isDark ? '0 12px 40px rgba(0,0,0,.5)' : '0 10px 30px rgba(0,0,0,.12)',
-        fontFamily: isHubspot ? '-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif' : theme.templateId === 'corporate' ? 'Georgia, serif' : 'system-ui, sans-serif',
+        fontFamily: isHubspot ? '-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif' : theme.templateId === 'corporate' ? 'Georgia, serif' : theme.templateId === 'premium_slate' || theme.templateId === 'saas_elite' ? 'Inter, system-ui, sans-serif' : isCleanIos ? '-apple-system, BlinkMacSystemFont, SF Pro Text, sans-serif' : 'system-ui, sans-serif',
         flexShrink: 0,
         border: isDark ? '1px solid #1e293b' : '1px solid rgba(0,0,0,.07)',
       }}
@@ -89,45 +219,47 @@ function WidgetPreview({ config, theme }) {
       >
         {/* Avatar in header */}
         {theme.logoUrl ? (
-          <img src={theme.logoUrl} alt="Logo" style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255,255,255,.3)' }} />
+          <img src={theme.logoUrl} alt="Logo" style={{ width: 32, height: 32, borderRadius: '50%', objectFit: 'cover', border: isCleanIos ? '2px solid rgba(0,0,0,.08)' : '2px solid rgba(255,255,255,.3)' }} />
         ) : (
-          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(255,255,255,.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
+          <div style={{ width: 32, height: 32, borderRadius: '50%', background: isCleanIos ? 'rgba(0,0,0,.06)' : 'rgba(255,255,255,.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: headerText, fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
             {(config.name || 'AI').substring(0, 2).toUpperCase()}
           </div>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ color: '#fff', fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <div style={{ color: headerText, fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {config.name || 'Chat'}
           </div>
-          {isHubspot && <div style={{ color: 'rgba(255,255,255,.65)', fontSize: 10, marginTop: 1 }}>● Powered by AI</div>}
+          {(isHubspot || theme.templateId === 'saas_elite' || theme.templateId === 'premium_slate') && (
+            <div style={{ color: isCleanIos ? 'rgba(0,0,0,.45)' : 'rgba(255,255,255,.65)', fontSize: 10, marginTop: 1 }}>● Powered by AI</div>
+          )}
         </div>
-        <span style={{ color: 'rgba(255,255,255,.7)', fontSize: 20, lineHeight: 1, marginLeft: 'auto', cursor: 'pointer' }}>×</span>
+        <span style={{ color: isCleanIos ? 'rgba(0,0,0,.4)' : 'rgba(255,255,255,.7)', fontSize: 20, lineHeight: 1, marginLeft: 'auto', cursor: 'pointer' }}>×</span>
       </div>
 
       {/* Messages area */}
       <div
         style={{
-          background: isDark ? '#1e293b' : '#fff',
+          background: isDark ? '#1e293b' : isCleanIos ? '#fff' : '#f8fafc',
           padding: '12px 12px 8px',
-          minHeight: 130,
+          minHeight: 160,
           display: 'flex',
           flexDirection: 'column',
           gap: 8,
         }}
       >
-        {/* Bot welcome row */}
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, width: '100%' }}>
+        {/* Bot welcome row — avatar pinned to top */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, width: '100%' }}>
           {theme.botAvatarUrl ? (
             <img
               src={theme.botAvatarUrl}
               alt="Avatar"
-              style={{ width: 22, height: 22, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+              style={{ width: 24, height: 24, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, marginTop: 2 }}
             />
           ) : (
             <div
               style={{
-                width: 22,
-                height: 22,
+                width: 24,
+                height: 24,
                 borderRadius: '50%',
                 background: primary,
                 color: '#fff',
@@ -137,29 +269,102 @@ function WidgetPreview({ config, theme }) {
                 alignItems: 'center',
                 justifyContent: 'center',
                 flexShrink: 0,
+                marginTop: 2,
               }}
             >
               {(config.name || 'AI').substring(0, 2).toUpperCase()}
             </div>
           )}
-          <div
-            style={{
-              background: botBg,
-              color: botText,
-              padding: '8px 12px',
-              borderRadius: 12,
-              borderBottomLeftRadius: 4,
-              fontSize: 12,
-              maxWidth: '75%',
-            }}
-          >
-            {config.welcomeMessage || 'Hello! How can I help you today?'}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxWidth: '78%' }}>
+            <div
+              style={{
+                background: botBg,
+                color: botText,
+                padding: '8px 12px',
+                borderRadius: isCleanIos ? 18 : 12,
+                borderBottomLeftRadius: 4,
+                fontSize: 12,
+                lineHeight: 1.5,
+                border: isDark ? 'none' : '1px solid rgba(0,0,0,.04)',
+                boxShadow: isDark ? 'none' : '0 1px 3px rgba(0,0,0,.06)',
+              }}
+            >
+              {config.welcomeMessage || 'Hello! How can I help you today?'}
+            </div>
+            <span style={{ fontSize: 9, color: '#94a3b8', paddingLeft: 2 }}>2:40 PM</span>
+          </div>
+        </div>
+
+        {/* User bubble */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxWidth: '78%', alignItems: 'flex-end' }}>
+            <div
+              style={{
+                background: userBg,
+                color: '#fff',
+                padding: '8px 12px',
+                borderRadius: isCleanIos ? 18 : 12,
+                borderBottomRightRadius: 4,
+                fontSize: 12,
+              }}
+            >
+              Tell me about your privacy policy
+            </div>
+            <span style={{ fontSize: 9, color: '#94a3b8', paddingRight: 2 }}>2:41 PM</span>
+          </div>
+        </div>
+
+        {/* Bot reply row — avatar stays at top even on long messages */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, width: '100%' }}>
+          {theme.botAvatarUrl ? (
+            <img
+              src={theme.botAvatarUrl}
+              alt="Avatar"
+              style={{ width: 24, height: 24, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, marginTop: 2 }}
+            />
+          ) : (
+            <div
+              style={{
+                width: 24,
+                height: 24,
+                borderRadius: '50%',
+                background: primary,
+                color: '#fff',
+                fontSize: 8,
+                fontWeight: 'bold',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                marginTop: 2,
+              }}
+            >
+              {(config.name || 'AI').substring(0, 2).toUpperCase()}
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxWidth: '78%' }}>
+            <div
+              style={{
+                background: botBg,
+                color: botText,
+                padding: '8px 12px',
+                borderRadius: isCleanIos ? 18 : 12,
+                borderBottomLeftRadius: 4,
+                fontSize: 12,
+                lineHeight: 1.5,
+                border: isDark ? 'none' : '1px solid rgba(0,0,0,.04)',
+                boxShadow: isDark ? 'none' : '0 1px 3px rgba(0,0,0,.06)',
+              }}
+            >
+              We protect your data with industry-standard encryption. Our privacy policy is updated regularly.
+            </div>
+            <span style={{ fontSize: 9, color: '#94a3b8', paddingLeft: 2 }}>2:41 PM</span>
           </div>
         </div>
 
         {/* Starter chips */}
         {starterQs.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 28 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 32 }}>
             {starterQs.map((q, i) => (
               <button
                 key={i}
@@ -249,7 +454,7 @@ function WidgetPreview({ config, theme }) {
       </div>
 
       {/* Input area */}
-      <div style={{ borderTop: `1px solid ${isDark ? '#1e293b' : '#e2e8f0'}`, background: isDark ? '#0f172a' : '#fff' }}>
+      <div style={inputWrapStyle}>
         {/* Privacy banner */}
         {theme.privacyPolicyText && (
           <div style={{ background: isDark ? '#1e3a5f' : '#fff9e6', borderBottom: `1px solid ${isDark ? '#2d4a6e' : '#fde68a'}`, padding: '8px 12px', fontSize: 10.5, color: isDark ? '#93c5fd' : '#78350f', display: 'flex', alignItems: 'flex-start', gap: 6, lineHeight: 1.4 }}>
@@ -260,12 +465,12 @@ function WidgetPreview({ config, theme }) {
             <span style={{ color: 'inherit', opacity: 0.5, fontSize: 14, cursor: 'pointer' }}>×</span>
           </div>
         )}
-        <div style={{ padding: '8px 10px 4px', display: 'flex', gap: 6, alignItems: 'center' }}>
-          <div style={{ flex: 1, background: isDark ? '#1e293b' : '#f8fafc', border: `1.5px solid ${isDark ? '#334155' : '#e2e8f0'}`, borderRadius: 10, height: 30, fontSize: 11, color: '#94a3b8', display: 'flex', alignItems: 'center', paddingLeft: 10 }}>
-            Type a message…
+        <div style={inputInnerStyle}>
+          <div style={inputFieldStyle}>
+            {inputStyle === 'floating_pill' || inputStyle === 'minimal_borderless' ? 'Type a message…' : <span style={{ paddingLeft: 10 }}>Type a message…</span>}
           </div>
-          <div style={{ width: 32, height: 32, borderRadius: 10, background: userBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <svg viewBox="0 0 24 24" width={14} height={14} fill="#fff"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
+          <div style={inputBtnStyle}>
+            <svg viewBox="0 0 24 24" width={14} height={14} fill={inputSvgFill}><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
           </div>
         </div>
         {theme.disclaimerText && (
@@ -303,12 +508,12 @@ export default function BotConfig() {
     calloutMessage: '',
     calloutDelay: 3,
     disclaimerText: '',
-    privacyPolicyUrl: '',
     privacyPolicyText: '',
     feedbackEnabled: true,
     feedbackBadUrl: '',
     feedbackNeutralUrl: '',
     feedbackGoodUrl: '',
+    inputStyle: 'floating_pill',
   });
 
   const [newChip, setNewChip] = useState('');
@@ -361,6 +566,7 @@ export default function BotConfig() {
         feedbackBadUrl: parsedTheme.feedbackBadUrl || '',
         feedbackNeutralUrl: parsedTheme.feedbackNeutralUrl || '',
         feedbackGoodUrl: parsedTheme.feedbackGoodUrl || '',
+        inputStyle: parsedTheme.inputStyle || 'floating_pill',
       });
     } catch (err) {
       console.error('Load config error:', err);
@@ -845,6 +1051,22 @@ export default function BotConfig() {
                       />
                       <span className="text-xs font-medium text-gray-600">Enable AI Thinking Animation</span>
                     </label>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Message Input Style</label>
+                    <select
+                      value={theme.inputStyle}
+                      onChange={e => updateTheme('inputStyle', e.target.value)}
+                      className="input-field text-sm"
+                    >
+                      <option value="floating_pill">⚡ Floating Pill (Modern / HubSpot style)</option>
+                      <option value="minimal_borderless">✨ Minimalist Borderless (Sleek style)</option>
+                      <option value="classic_card">📦 Classic Card Box (Standard style)</option>
+                    </select>
+                    <p className="text-[11px] text-gray-400 mt-1">Changes the layout style of the message box footer</p>
                   </div>
                 </div>
 
