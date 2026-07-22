@@ -508,6 +508,10 @@ router.get('/embed.js', (req, res) => {
         privacyBanner.querySelector('.cb-privacy-x').onclick = function() {
           privacyBanner.style.display = 'none';
           localStorage.setItem(privacyBannerKey, '1');
+        };
+      }
+    }
+
     // Voice Input Recognition Handler
     var micBtn = box.querySelector('.cb-mic');
     var voiceWave = box.querySelector('.cb-voice-wave');
