@@ -36,9 +36,10 @@ export default function EmbedCode() {
   }
 
   const serverUrl = window.location.origin;
+  const apiHost = import.meta.env.VITE_API_URL || serverUrl;
   const currentBotId = botConfig?.id || botId;
 
-  const embedScript = `<script src="${serverUrl}/widget/embed.js" data-chatbot-id="${currentBotId}"></script>`;
+  const embedScript = `<script src="${apiHost}/widget/embed.js" data-chatbot-id="${currentBotId}"></script>`;
 
   const apiExamples = {
     curl: `curl -X POST ${serverUrl}/api/chat/message \\
