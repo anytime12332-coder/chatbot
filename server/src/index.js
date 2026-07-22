@@ -85,6 +85,9 @@ console.log('[Boot] ✓ lead routes loaded');
 const ragRoutes = require('./routes/rag');
 console.log('[Boot] ✓ RAG routes loaded');
 
+const voiceRoutes = require('./routes/voice');
+console.log('[Boot] ✓ Voice routes loaded');
+
 app.use('/api/auth', authRoutes);
 app.use('/api/chatbots', chatbotRoutes);
 app.use('/api/api-config', apiConfigRoutes);
@@ -92,6 +95,7 @@ app.use('/api/chat', chatLimiter, chatRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/leads', leadRoutes);
 app.use('/api/rag', ragRoutes);
+app.use('/api/voice', voiceRoutes);
 app.use('/widget', widgetRoutes);
 
 console.log('[Boot] ✓ All routes registered');

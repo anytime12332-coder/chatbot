@@ -766,7 +766,7 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
       if (isStreaming) {
         res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
         res.write(`data: ${JSON.stringify({ type: 'chunk', content: nextQuestion.question })}\n\n`);
-        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id, leadField: nextQuestion.id, leadLabel: nextQuestion.label })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id, leadField: nextQuestion.id, leadLabel: nextQuestion.label, leadOptions: nextQuestion.options || [] })}\n\n`);
         res.end();
       } else {
         res.json({
@@ -776,6 +776,7 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
           conversationId: conversation.id,
           leadField: nextQuestion.id,
           leadLabel: nextQuestion.label,
+          leadOptions: nextQuestion.options || [],
         });
       }
       return true;
@@ -854,7 +855,7 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
       if (isStreaming) {
         res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
         res.write(`data: ${JSON.stringify({ type: 'chunk', content: firstQuestion.question })}\n\n`);
-        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id, leadField: firstQuestion.id, leadLabel: firstQuestion.label })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id, leadField: firstQuestion.id, leadLabel: firstQuestion.label, leadOptions: firstQuestion.options || [] })}\n\n`);
         res.end();
       } else {
         res.json({
@@ -864,6 +865,7 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
           conversationId: conversation.id,
           leadField: firstQuestion.id,
           leadLabel: firstQuestion.label,
+          leadOptions: firstQuestion.options || [],
         });
       }
       return true;

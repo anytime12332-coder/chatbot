@@ -152,6 +152,7 @@ router.put('/:id', async (req, res) => {
         ...(leadPhoneFormat !== undefined && { leadPhoneFormat }),
         ...(widgetTheme !== undefined && { widgetTheme }),
         ...(leadScoringRules !== undefined && { leadScoringRules }),
+        ...(req.body.voiceConfig !== undefined && { voiceConfig: req.body.voiceConfig }),
         ...(ragEnabled !== undefined && { ragEnabled }),
         ...(ragProvider !== undefined && { ragProvider }),
         ...(ragApiKey !== undefined && { ragApiKey: ragApiKey.includes('****') ? existing.ragApiKey : encrypt(ragApiKey) }),

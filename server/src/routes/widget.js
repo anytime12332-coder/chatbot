@@ -8,7 +8,7 @@ router.get('/config/:botId', async (req, res) => {
   try {
     const chatbot = await prisma.chatbot.findUnique({
       where: { id: req.params.botId },
-      select: { id: true, name: true, welcomeMessage: true, primaryColor: true, position: true, isActive: true, widgetTheme: true },
+      select: { id: true, name: true, welcomeMessage: true, primaryColor: true, position: true, isActive: true, widgetTheme: true, voiceConfig: true },
     });
     if (!chatbot || !chatbot.isActive) {
       return res.status(404).json({ error: 'Bot not found or inactive' });
@@ -25,7 +25,7 @@ router.get('/config', async (req, res) => {
   try {
     const chatbot = await prisma.chatbot.findFirst({
       where: { isActive: true },
-      select: { id: true, name: true, welcomeMessage: true, primaryColor: true, position: true, isActive: true, widgetTheme: true },
+      select: { id: true, name: true, welcomeMessage: true, primaryColor: true, position: true, isActive: true, widgetTheme: true, voiceConfig: true },
     });
     if (!chatbot) return res.status(404).json({ error: 'No active bot found' });
     res.json(chatbot);
@@ -250,6 +250,12 @@ router.get('/embed.js', (req, res) => {
     var feedbackGoodUrl = theme.feedbackGoodUrl || '';
     var feedbackShown = false;
 
+    // Voice Config
+    var voiceObj = {};
+    try { voiceObj = JSON.parse(config.voiceConfig || '{}'); } catch(e) {}
+    var voiceEnabled = Boolean(voiceObj.enabled);
+    var voiceAutoSend = Boolean(voiceObj.autoSend);
+
     var position = config.position || 'bottom-right';
     var posRight = position.includes('right') ? '20px' : 'auto';
     var posLeft = position.includes('left') ? '20px' : 'auto';
@@ -320,6 +326,24 @@ router.get('/embed.js', (req, res) => {
       '.cb-chips{display:flex;flex-wrap:wrap;gap:6px;padding:2px 0 2px 36px}' +
       '.cb-chip{background:' + (isDark ? '#334155' : '#fff') + ';color:var(--cb-primary);border:1.5px solid var(--cb-primary);padding:6px 13px;border-radius:20px;font-size:12.5px;cursor:pointer;transition:all .18s;font-family:inherit;font-weight:500}' +
       '.cb-chip:hover{background:var(--cb-primary);color:#fff;transform:translateY(-1px)}' +
+      // Voice input & Waveform pulse styles
+      '.cb-mic{background:none;border:none;cursor:pointer;padding:6px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:' + (isDark ? '#94a3b8' : '#64748b') + ';transition:all .2s;flex-shrink:0;margin-right:2px}' +
+      '.cb-mic:hover{color:var(--cb-primary);background:' + activePrimaryColor + '18}' +
+      '.cb-mic.recording{color:#ef4444;background:#fee2e2;animation:cb-mic-pulse 1.2s infinite}' +
+      '@keyframes cb-mic-pulse{0%{transform:scale(1)}50%{transform:scale(1.15)}100%{transform:scale(1)}}' +
+      '.cb-mic svg{width:18px;height:18px;fill:currentColor}' +
+      '.cb-voice-wave{position:absolute;inset:0;background:' + (isDark ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.96)') + ';border-radius:inherit;display:none;align-items:center;justify-content:center;gap:4px;z-index:10;padding:0 14px}' +
+      '.cb-wave-bar{width:4px;height:16px;background:var(--cb-primary);border-radius:4px;animation:cb-wave-anim 0.75s ease-in-out infinite alternate}' +
+      '.cb-wave-bar:nth-child(1){animation-delay:0s}' +
+      '.cb-wave-bar:nth-child(2){animation-delay:0.18s}' +
+      '.cb-wave-bar:nth-child(3){animation-delay:0.36s}' +
+      '.cb-wave-bar:nth-child(4){animation-delay:0.54s}' +
+      '@keyframes cb-wave-anim{0%{height:6px;opacity:0.4}100%{height:22px;opacity:1}}' +
+      '.cb-voice-text{font-size:12px;color:' + (isDark ? '#f1f5f9' : '#1e293b') + ';margin-left:8px;font-weight:600;flex:1}' +
+      // Option pills for lead questions
+      '.cb-lead-opts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}' +
+      '.cb-opt-pill{background:' + (isDark ? '#1e293b' : '#fff') + ';color:var(--cb-primary);border:1.5px solid var(--cb-primary);padding:5px 12px;border-radius:16px;font-size:12px;font-weight:600;cursor:pointer;transition:all .18s;font-family:inherit}' +
+      '.cb-opt-pill:hover{background:var(--cb-primary);color:#fff;transform:translateY(-1px)}' +
       // Privacy banner
       '.cb-privacy{background:' + (isDark ? '#1e3a5f' : '#fff9e6') + ';border-top:1px solid ' + (isDark ? '#2d4a6e' : '#fde68a') + ';padding:10px 14px;font-size:11.5px;color:' + (isDark ? '#93c5fd' : '#78350f') + ';display:flex;align-items:flex-start;gap:8px;flex-shrink:0;line-height:1.5}' +
       '.cb-privacy a{color:var(--cb-primary);font-weight:600;text-decoration:underline}' +
@@ -451,9 +475,13 @@ router.get('/embed.js', (req, res) => {
         '<button class="cb-hdr-x" aria-label="Close">&times;</button>' +
       '</div>' +
       '<div class="cb-msgs"></div>' +
-      '<div class="cb-in-wrap style-' + inputStyle + '">' +
+      '<div class="cb-in-wrap style-' + inputStyle + '" style="position:relative;">' +
         (privacyText ? '<div class="cb-privacy" id="cb-privacy-banner"><span>' + privacyText + (privacyUrl ? ' <a href="' + privacyUrl + '" target="_blank" rel="noopener">privacy policy</a>.' : '') + '</span><button class="cb-privacy-x" title="Dismiss">&times;</button></div>' : '') +
-        '<div class="cb-in"><div class="cb-inp-wrap"><textarea class="cb-inp" rows="1" placeholder="Type a message\u2026"></textarea></div><button class="cb-snd"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button></div>' +
+        '<div class="cb-in"><div class="cb-inp-wrap"><textarea class="cb-inp" rows="1" placeholder="Type a message\u2026"></textarea></div>' +
+        (voiceEnabled ? '<button class="cb-mic" title="Voice Input"><svg viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg></button>' : '') +
+        '<button class="cb-snd"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>' +
+        '<div class="cb-voice-wave"><div class="cb-wave-bar"></div><div class="cb-wave-bar"></div><div class="cb-wave-bar"></div><div class="cb-wave-bar"></div><span class="cb-voice-text">Listening...</span><button class="cb-voice-close" style="background:none;border:none;color:inherit;cursor:pointer;font-size:16px;line-height:1;">&times;</button></div>' +
+        '</div>' +
         disclaimerHtml +
       '</div>';
 
@@ -480,7 +508,67 @@ router.get('/embed.js', (req, res) => {
         privacyBanner.querySelector('.cb-privacy-x').onclick = function() {
           privacyBanner.style.display = 'none';
           localStorage.setItem(privacyBannerKey, '1');
-        };
+    // Voice Input Recognition Handler
+    var micBtn = box.querySelector('.cb-mic');
+    var voiceWave = box.querySelector('.cb-voice-wave');
+    var voiceClose = box.querySelector('.cb-voice-close');
+    var isRecording = false, recognition = null;
+
+    if (micBtn && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+      var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = voiceObj.language || 'en-US';
+
+      recognition.onstart = function() {
+        isRecording = true;
+        micBtn.classList.add('recording');
+        if (voiceWave) voiceWave.style.display = 'flex';
+      };
+
+      recognition.onresult = function(event) {
+        var transcript = '';
+        for (var i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        inp.value = transcript;
+        inp.style.height = 'auto';
+        inp.style.height = Math.min(inp.scrollHeight, 90) + 'px';
+      };
+
+      recognition.onerror = function() {
+        stopRecording();
+      };
+
+      recognition.onend = function() {
+        stopRecording();
+        if (voiceAutoSend && inp.value.trim()) {
+          sendMsg();
+        }
+      };
+
+      function stopRecording() {
+        isRecording = false;
+        try { recognition.stop(); } catch(e) {}
+        if (micBtn) micBtn.classList.remove('recording');
+        if (voiceWave) voiceWave.style.display = 'none';
+      }
+
+      micBtn.onclick = function() {
+        if (isRecording) {
+          stopRecording();
+        } else {
+          try {
+            recognition.start();
+          } catch(e) {
+            console.error('Speech recognition start error:', e);
+          }
+        }
+      };
+
+      if (voiceClose) {
+        voiceClose.onclick = stopRecording;
       }
     }
 
@@ -685,7 +773,7 @@ router.get('/embed.js', (req, res) => {
     }
 
     // ── Inline Contact/Lead input box ─────────────────────────────────────────────
-    function renderLeadCard(fieldId, label) {
+    function renderLeadCard(fieldId, label, options) {
       var existingCard = msgs.querySelector('.cb-lead-card[data-field="' + fieldId + '"]');
       if (existingCard) return;
 
@@ -698,6 +786,15 @@ router.get('/embed.js', (req, res) => {
       if (fieldId === 'email') inputType = 'email';
       if (fieldId === 'phone') inputType = 'tel';
 
+      var optionsHtml = '';
+      if (options && options.length > 0) {
+        optionsHtml = '<div class="cb-lead-opts">' +
+          options.map(function(opt) {
+            return '<button type="button" class="cb-opt-pill" data-val="' + String(opt).replace(/"/g, '&quot;') + '">' + opt + '</button>';
+          }).join('') +
+        '</div>';
+      }
+
       card.innerHTML =
         '<div class="cb-lead-title">Provide ' + label + '</div>' +
         '<div class="cb-lead-input-row">' +
@@ -705,7 +802,8 @@ router.get('/embed.js', (req, res) => {
           '<button class="cb-lead-input-submit">' +
             '<svg viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>' +
           '</button>' +
-        '</div>';
+        '</div>' +
+        optionsHtml;
 
       msgs.appendChild(card);
       msgs.scrollTop = msgs.scrollHeight;
@@ -714,6 +812,13 @@ router.get('/embed.js', (req, res) => {
       var submitBtn = card.querySelector('.cb-lead-input-submit');
 
       input.focus();
+
+      card.querySelectorAll('.cb-opt-pill').forEach(function(pill) {
+        pill.onclick = function() {
+          input.value = pill.getAttribute('data-val');
+          submitVal();
+        };
+      });
 
       function submitVal() {
         var val = input.value.trim();
@@ -829,7 +934,7 @@ router.get('/embed.js', (req, res) => {
                 } else if (data.type === 'done') {
                   botTs.textContent = nowTime();
                   if (data.leadField) {
-                    renderLeadCard(data.leadField, data.leadLabel);
+                    renderLeadCard(data.leadField, data.leadLabel, data.leadOptions);
                   }
                 } else if (data.type === 'error') {
                   if (isFirstToken) botBubble.innerHTML = '';

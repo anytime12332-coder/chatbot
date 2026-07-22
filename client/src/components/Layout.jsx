@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useBots } from '../context/BotContext';
 import {
   LayoutDashboard, Bot, Key, Code, MessageSquare, Settings,
-  LogOut, Menu, X, ChevronDown, Plus, List, BarChart3, Users, Database,
+  LogOut, Menu, X, ChevronDown, Plus, List, BarChart3, Users, Database, Mic,
 } from 'lucide-react';
 
 export default function Layout({ children }) {
@@ -39,6 +39,7 @@ export default function Layout({ children }) {
   const botNav = currentBot ? [
     { to: `/bot/${currentBot.id}/dashboard`, icon: LayoutDashboard, label: 'Dashboard' },
     { to: `/bot/${currentBot.id}/config`, icon: Bot, label: 'Bot Config' },
+    { to: `/bot/${currentBot.id}/voice`, icon: Mic, label: 'Voice Input' },
     { to: `/bot/${currentBot.id}/rag`, icon: Database, label: 'RAG Knowledge' },
     { to: `/bot/${currentBot.id}/leads`, icon: Users, label: 'Leads' },
     { to: `/bot/${currentBot.id}/api`, icon: Key, label: 'API Settings' },

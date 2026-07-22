@@ -47,6 +47,7 @@ model Chatbot {
   leadPhoneFormat       String  @default("IN") // "IN", "US", "ALL"
   widgetTheme           String  @default("{}") @db.Text // JSON configuration for widget appearance
   leadScoringRules      String  @default("{}") @db.Text // JSON configuration for lead scoring rules
+  voiceConfig           String  @default("{}") @db.Text // JSON configuration for voice input settings
   leads                 Lead[]
 
   // RAG configurations

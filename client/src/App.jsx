@@ -14,6 +14,7 @@ import Settings from './pages/Settings';
 import Leads from './pages/Leads';
 import LeadsConfig from './pages/LeadsConfig';
 import RagSettings from './pages/RagSettings';
+import VoiceConfig from './pages/VoiceConfig';
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -42,6 +43,7 @@ export default function App() {
                   <Route path="/chatbots" element={<ChatbotList />} />
                   <Route path="/bot/:botId/dashboard" element={<BotDashboard />} />
                   <Route path="/bot/:botId/config" element={<BotConfig />} />
+                  <Route path="/bot/:botId/voice" element={<VoiceConfig />} />
                   <Route path="/bot/:botId/rag" element={<RagSettings />} />
                   <Route path="/bot/:botId/api" element={<ApiConfig />} />
                   <Route path="/bot/:botId/embed" element={<EmbedCode />} />

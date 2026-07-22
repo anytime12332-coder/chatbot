@@ -331,7 +331,7 @@ export default function LeadsConfig() {
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 flex-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 flex-1">
                       <div>
                         <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Field ID / Key</label>
                         <input
@@ -339,7 +339,7 @@ export default function LeadsConfig() {
                           value={q.id}
                           onChange={e => handleQuestionChange(idx, 'id', e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
                           className="input-field text-xs font-mono py-1.5"
-                          placeholder="e.g. name"
+                          placeholder="e.g. service"
                           required
                         />
                       </div>
@@ -350,21 +350,68 @@ export default function LeadsConfig() {
                           value={q.label}
                           onChange={e => handleQuestionChange(idx, 'label', e.target.value)}
                           className="input-field text-xs py-1.5"
-                          placeholder="e.g. Full Name"
+                          placeholder="e.g. Service Needed"
                           required
                         />
                       </div>
-                      <div className="sm:col-span-2 lg:col-span-1">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Input Format</label>
+                        <select
+                          value={q.type || (q.options?.length > 0 ? 'select' : 'text')}
+                          onChange={e => {
+                            const newType = e.target.value;
+                            handleQuestionChange(idx, 'type', newType);
+                            if (newType === 'text') {
+                              handleQuestionChange(idx, 'options', []);
+                            } else if (!q.options || q.options.length === 0) {
+                              handleQuestionChange(idx, 'options', ['Option 1', 'Option 2', 'Option 3']);
+                            }
+                          }}
+                          className="input-field text-xs py-1.5"
+                        >
+                          <option value="text">Open Text Field</option>
+                          <option value="select">Multiple Choice Pills</option>
+                        </select>
+                      </div>
+                      <div>
                         <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Chatbot Question Prompt</label>
                         <input
                           type="text"
                           value={q.question}
                           onChange={e => handleQuestionChange(idx, 'question', e.target.value)}
                           className="input-field text-xs py-1.5"
-                          placeholder="e.g. What is your name?"
+                          placeholder="e.g. Which service do you need?"
                           required
                         />
                       </div>
+
+                      {(q.type === 'select' || (q.options && q.options.length > 0)) && (
+                        <div className="col-span-1 sm:col-span-2 lg:col-span-4 bg-white p-3 rounded-lg border border-gray-200 space-y-2">
+                          <label className="block text-xs font-semibold text-primary-700 uppercase tracking-wider">
+                            Options List (Comma-separated)
+                          </label>
+                          <input
+                            type="text"
+                            value={Array.isArray(q.options) ? q.options.join(', ') : (q.options || '')}
+                            onChange={e => {
+                              const optsArray = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                              handleQuestionChange(idx, 'options', optsArray);
+                            }}
+                            className="input-field text-xs py-1.5"
+                            placeholder="e.g. Web Development, AI Chatbot, Mobile App, Consulting"
+                          />
+                          {Array.isArray(q.options) && q.options.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              <span className="text-[10px] text-gray-400 font-semibold uppercase self-center mr-1">Chatbot Pill Preview:</span>
+                              {q.options.map((opt, oIdx) => (
+                                <span key={oIdx} className="px-2.5 py-0.5 bg-primary-50 text-primary-700 border border-primary-200 text-xs font-medium rounded-full">
+                                  {opt}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <button
