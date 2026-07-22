@@ -516,58 +516,106 @@ router.get('/embed.js', (req, res) => {
     var micBtn = box.querySelector('.cb-mic');
     var voiceWave = box.querySelector('.cb-voice-wave');
     var voiceClose = box.querySelector('.cb-voice-close');
-    var isRecording = false, recognition = null;
+    var isRecording = false, manualStop = false, recognition = null;
 
     if (micBtn && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
       var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = voiceObj.language || 'en-US';
 
-      recognition.onstart = function() {
-        isRecording = true;
-        micBtn.classList.add('recording');
-        if (voiceWave) voiceWave.style.display = 'flex';
-      };
+      function createRecognition() {
+        var rec = new SpeechRecognition();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = voiceObj.language || 'en-US';
 
-      recognition.onresult = function(event) {
-        var transcript = '';
-        for (var i = event.resultIndex; i < event.results.length; i++) {
-          transcript += event.results[i][0].transcript;
-        }
-        inp.value = transcript;
-        inp.style.height = 'auto';
-        inp.style.height = Math.min(inp.scrollHeight, 90) + 'px';
-      };
+        rec.onstart = function() {
+          isRecording = true;
+          micBtn.classList.add('recording');
+          if (voiceWave) voiceWave.style.display = 'flex';
+        };
 
-      recognition.onerror = function() {
-        stopRecording();
-      };
+        rec.onresult = function(event) {
+          var transcript = '';
+          for (var i = 0; i < event.results.length; i++) {
+            transcript += event.results[i][0].transcript;
+          }
+          if (transcript.trim()) {
+            inp.value = transcript;
+            inp.style.height = 'auto';
+            inp.style.height = Math.min(inp.scrollHeight, 90) + 'px';
+          }
+        };
 
-      recognition.onend = function() {
-        stopRecording();
-        if (voiceAutoSend && inp.value.trim()) {
+        rec.onerror = function(event) {
+          if (event.error === 'no-speech' || event.error === 'audio-capture') {
+            return;
+          }
+          if (event.error !== 'aborted') {
+            console.warn('Speech recognition error:', event.error);
+          }
+        };
+
+        rec.onend = function() {
+          if (isRecording && !manualStop) {
+            try {
+              // prefer restarting via the shared `recognition` variable
+              if (recognition) {
+                recognition.start();
+                return;
+              }
+              // fallback: recreate and start
+              recognition = createRecognition();
+              recognition.start();
+              return;
+            } catch(e) {
+              // swallow and fall through to finish
+            }
+          }
+          finishRecording();
+        };
+
+        return rec;
+      }
+
+      function finishRecording() {
+        isRecording = false;
+        micBtn.classList.remove('recording');
+        if (voiceWave) voiceWave.style.display = 'none';
+        if (voiceAutoSend && inp.value.trim() && manualStop) {
           sendMsg();
         }
-      };
+      }
+
+      function startRecording() {
+        manualStop = false;
+        if (!recognition) {
+          recognition = createRecognition();
+        }
+        try {
+          recognition.start();
+        } catch(e) {
+          try {
+            recognition = createRecognition();
+            recognition.start();
+          } catch(err) {
+            console.error('Speech recognition start failed:', err);
+          }
+        }
+      }
 
       function stopRecording() {
+        manualStop = true;
         isRecording = false;
-        try { recognition.stop(); } catch(e) {}
-        if (micBtn) micBtn.classList.remove('recording');
-        if (voiceWave) voiceWave.style.display = 'none';
+        if (recognition) {
+          try { recognition.stop(); } catch(e) {}
+        }
+        finishRecording();
       }
 
       micBtn.onclick = function() {
         if (isRecording) {
           stopRecording();
         } else {
-          try {
-            recognition.start();
-          } catch(e) {
-            console.error('Speech recognition start error:', e);
-          }
+          startRecording();
         }
       };
 

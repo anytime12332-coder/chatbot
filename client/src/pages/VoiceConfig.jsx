@@ -28,6 +28,7 @@ export default function VoiceConfig() {
   const [audioLevel, setAudioLevel] = useState(0);
   const recognitionRef = useRef(null);
   const animFrameRef = useRef(null);
+  const manualStopRef = useRef(false);
 
   useEffect(() => {
     if (botId) loadConfig();
@@ -119,6 +120,7 @@ export default function VoiceConfig() {
     rec.lang = config.language || 'en-US';
 
     rec.onstart = () => {
+      manualStopRef.current = false;
       setIsRecording(true);
       setLiveTranscript('Listening to your speech...');
       simulateAudioVisualizer();
@@ -129,21 +131,32 @@ export default function VoiceConfig() {
       for (let i = 0; i < event.results.length; i++) {
         currentText += event.results[i][0].transcript;
       }
-      setLiveTranscript(currentText || 'Listening...');
+      if (currentText.trim()) {
+        setLiveTranscript(currentText);
+      }
     };
 
     rec.onerror = (event) => {
+      if (event.error === 'no-speech' || event.error === 'audio-capture') {
+        return;
+      }
       console.warn('Speech test error:', event.error);
-      stopRecordingTest();
-      setLiveTranscript(`Recording stopped: ${event.error}`);
     };
 
     rec.onend = () => {
+      if (!manualStopRef.current && recognitionRef.current) {
+        try {
+          // attempt to restart using the live reference (safer than reusing closed `rec` variable)
+          recognitionRef.current.start();
+          return;
+        } catch (_) {}
+      }
       stopRecordingTest();
     };
 
     recognitionRef.current = rec;
     try {
+      manualStopRef.current = false;
       rec.start();
     } catch (e) {
       console.error('Failed to start speech test:', e);
@@ -152,6 +165,7 @@ export default function VoiceConfig() {
 
   function stopRecordingTest() {
     setIsRecording(false);
+    manualStopRef.current = true;
     if (recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch (_) {}
       recognitionRef.current = null;
