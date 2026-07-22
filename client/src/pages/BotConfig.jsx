@@ -514,6 +514,8 @@ export default function BotConfig() {
     feedbackNeutralUrl: '',
     feedbackGoodUrl: '',
     inputStyle: 'floating_pill',
+    launcherStyle: 'default_bubble',
+    launcherPillText: 'Chat with us',
   });
 
   const [newChip, setNewChip] = useState('');
@@ -567,6 +569,8 @@ export default function BotConfig() {
         feedbackNeutralUrl: parsedTheme.feedbackNeutralUrl || '',
         feedbackGoodUrl: parsedTheme.feedbackGoodUrl || '',
         inputStyle: parsedTheme.inputStyle || 'floating_pill',
+        launcherStyle: parsedTheme.launcherStyle || 'default_bubble',
+        launcherPillText: parsedTheme.launcherPillText || 'Chat with us',
       });
     } catch (err) {
       console.error('Load config error:', err);
@@ -880,6 +884,37 @@ export default function BotConfig() {
                     />
                     <p className="text-[11px] text-gray-400 mt-1">Avatar shown next to every bot message</p>
                   </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Launcher Button Style</label>
+                    <select
+                      value={theme.launcherStyle}
+                      onChange={e => updateTheme('launcherStyle', e.target.value)}
+                      className="input-field text-sm"
+                    >
+                      <option value="default_bubble">💬 Classic Circle Bubble</option>
+                      <option value="glowing_ring">💫 Glowing Ring Pulse (Animated)</option>
+                      <option value="sleek_square">🔳 Sleek Minimalist Square</option>
+                      <option value="modern_pill">💊 Conversational Capsule Pill</option>
+                    </select>
+                    <p className="text-[11px] text-gray-400 mt-1">Determines the visual theme of the floating launcher button</p>
+                  </div>
+                  {theme.launcherStyle === 'modern_pill' && (
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Launcher Pill Text</label>
+                      <input
+                        type="text"
+                        value={theme.launcherPillText}
+                        onChange={e => updateTheme('launcherPillText', e.target.value)}
+                        className="input-field text-sm"
+                        placeholder="Chat with us"
+                        maxLength={25}
+                      />
+                      <p className="text-[11px] text-gray-400 mt-1">Text shown inside the pill (up to 25 characters)</p>
+                    </div>
+                  )}
                 </div>
               </div>
 

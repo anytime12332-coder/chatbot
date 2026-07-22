@@ -289,10 +289,16 @@ async function getAIResponse(messages, config) {
  */
 async function streamOpenAICompatible(url, headers, body, onChunk) {
   body.stream = true;
+  // Request usage statistics in stream if supported (OpenAI)
+  if (url.includes('api.openai.com')) {
+    body.stream_options = { include_usage: true };
+  }
+
   const stream = await makeStreamRequest(url, { method: 'POST', headers }, body);
 
   let fullContent = '';
   let buffer = '';
+  let tokenCount = 0;
 
   return new Promise((resolve, reject) => {
     stream.on('data', (chunk) => {
@@ -313,6 +319,9 @@ async function streamOpenAICompatible(url, headers, body, onChunk) {
             fullContent += delta;
             onChunk(delta);
           }
+          if (parsed.usage) {
+            tokenCount = parsed.usage.total_tokens;
+          }
         } catch (e) {
           // skip unparseable chunks
         }
@@ -320,7 +329,13 @@ async function streamOpenAICompatible(url, headers, body, onChunk) {
     });
 
     stream.on('end', () => {
-      resolve({ content: fullContent, tokenCount: 0 });
+      // Estimate token count if API did not return usage info
+      if (tokenCount === 0) {
+        const inputStr = (body.messages || []).map(m => m.content).join(' ');
+        const chars = inputStr.length + fullContent.length;
+        tokenCount = Math.round(chars / 4) || 1;
+      }
+      resolve({ content: fullContent, tokenCount });
     });
 
     stream.on('error', reject);

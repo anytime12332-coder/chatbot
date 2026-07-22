@@ -205,7 +205,14 @@ function validateField(fieldId, value, phoneFormat = 'IN') {
   const cleanVal = value.trim();
   const idLower = String(fieldId || '').toLowerCase();
   
+  // Cross-validation checks to prevent unclear data inputs
+  const isPureNumbers = /^\+?\d{7,15}$/.test(cleanVal.replace(/[-\s()]/g, ''));
+  const hasAtSymbol = cleanVal.includes('@');
+
   if (idLower === 'email' || idLower.includes('email') || idLower.includes('mail')) {
+    if (isPureNumbers) {
+      return { is_valid: false, reason: 'unclear data (looks like a phone number instead of an email)' };
+    }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(cleanVal)) {
       return { is_valid: false, reason: 'invalid email pattern' };
@@ -219,6 +226,9 @@ function validateField(fieldId, value, phoneFormat = 'IN') {
   }
 
   if (idLower === 'phone' || idLower.includes('phone') || idLower.includes('mobile') || idLower.includes('contact')) {
+    if (hasAtSymbol) {
+      return { is_valid: false, reason: 'unclear data (looks like an email instead of a phone number)' };
+    }
     const digits = cleanVal.replace(/\D/g, '');
     if (phoneFormat === 'IN') {
       const isValidIN = (digits.length === 10 && /^[6-9]\d{9}$/.test(digits)) || 
@@ -238,6 +248,20 @@ function validateField(fieldId, value, phoneFormat = 'IN') {
     }
     return { is_valid: true };
   }
+
+  if (idLower === 'name' || idLower.includes('name') || idLower.includes('visitor')) {
+    if (hasAtSymbol) {
+      return { is_valid: false, reason: 'unclear data (name cannot contain an @ symbol)' };
+    }
+    if (isPureNumbers || cleanVal.replace(/\D/g, '').length > 4) {
+      return { is_valid: false, reason: 'unclear data (name cannot be mostly numbers)' };
+    }
+    if (cleanVal.length < 2) {
+      return { is_valid: false, reason: 'value too short' };
+    }
+    return { is_valid: true };
+  }
+
   if (cleanVal.length < 2) {
     return { is_valid: false, reason: 'value too short' };
   }
@@ -701,7 +725,7 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
       if (isStreaming) {
         res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
         res.write(`data: ${JSON.stringify({ type: 'chunk', content: extractionResult.bot_reply })}\n\n`);
-        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id, leadField: currentQuestion.id, leadLabel: currentQuestion.label })}\n\n`);
         res.end();
       } else {
         res.json({
@@ -709,6 +733,8 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
           sessionId: currentSessionId,
           messageId: assistantMessage.id,
           conversationId: conversation.id,
+          leadField: currentQuestion.id,
+          leadLabel: currentQuestion.label,
         });
       }
       return true;
@@ -740,7 +766,7 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
       if (isStreaming) {
         res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
         res.write(`data: ${JSON.stringify({ type: 'chunk', content: nextQuestion.question })}\n\n`);
-        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id, leadField: nextQuestion.id, leadLabel: nextQuestion.label })}\n\n`);
         res.end();
       } else {
         res.json({
@@ -748,6 +774,8 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
           sessionId: currentSessionId,
           messageId: assistantMessage.id,
           conversationId: conversation.id,
+          leadField: nextQuestion.id,
+          leadLabel: nextQuestion.label,
         });
       }
       return true;
@@ -826,7 +854,7 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
       if (isStreaming) {
         res.write(`data: ${JSON.stringify({ type: 'start', sessionId: currentSessionId, conversationId: conversation.id })}\n\n`);
         res.write(`data: ${JSON.stringify({ type: 'chunk', content: firstQuestion.question })}\n\n`);
-        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'done', messageId: assistantMessage.id, leadField: firstQuestion.id, leadLabel: firstQuestion.label })}\n\n`);
         res.end();
       } else {
         res.json({
@@ -834,6 +862,8 @@ async function handleLeadCollection(chatbot, conversation, message, res, isStrea
           sessionId: currentSessionId,
           messageId: assistantMessage.id,
           conversationId: conversation.id,
+          leadField: firstQuestion.id,
+          leadLabel: firstQuestion.label,
         });
       }
       return true;

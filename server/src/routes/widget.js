@@ -38,8 +38,8 @@ router.get('/config', async (req, res) => {
 // POST /widget/feedback — save conversation rating
 router.post('/feedback', async (req, res) => {
   try {
-    const { sessionId, botId, rating, label } = req.body;
-    if (!sessionId || !rating) return res.status(400).json({ error: 'sessionId and rating required' });
+    const { sessionId, botId, rating, label, comment } = req.body;
+    if (!sessionId) return res.status(400).json({ error: 'sessionId required' });
 
     const conversation = await prisma.conversation.findFirst({
       where: { sessionId, ...(botId ? { chatbotId: botId } : {}), status: 'active' },
@@ -49,7 +49,12 @@ router.post('/feedback', async (req, res) => {
     if (conversation) {
       let existing = {};
       try { existing = JSON.parse(conversation.collectedData || '{}'); } catch (_) {}
-      existing.__feedback = { rating, label, submittedAt: new Date().toISOString() };
+      existing.__feedback = {
+        rating: rating ? parseInt(rating) : null,
+        label: label || 'Skipped',
+        comment: comment || '',
+        submittedAt: new Date().toISOString()
+      };
       await prisma.conversation.update({
         where: { id: conversation.id },
         data: { collectedData: JSON.stringify(existing), updatedAt: new Date() },
@@ -230,6 +235,8 @@ router.get('/embed.js', (req, res) => {
     var calloutDelay = parseInt(theme.calloutDelay) || 3;
     var disclaimerText = theme.disclaimerText || '';
     var inputStyle = theme.inputStyle || 'floating_pill';
+    var launcherStyle = theme.launcherStyle || 'default_bubble';
+    var launcherPillText = theme.launcherPillText || 'Chat with us';
 
     // Privacy Policy
     var privacyText = theme.privacyPolicyText || '';
@@ -262,10 +269,17 @@ router.get('/embed.js', (req, res) => {
       '--cb-font:' + activeFont + ';' +
       '--cb-shadow:' + preset.boxShadow + ';' +
       '}' +
-      // Launcher button
-      '.cb-btn{position:fixed;bottom:20px;right:' + posRight + ';left:' + posLeft + ';width:60px;height:60px;border-radius:50%;background:var(--cb-primary);border:none;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,.2);z-index:99998;display:flex;align-items:center;justify-content:center;transition:transform .3s,box-shadow .3s;padding:0}' +
+      // Launcher button base styles
+      '.cb-btn{position:fixed;bottom:20px;right:' + posRight + ';left:' + posLeft + ';background:var(--cb-primary);border:none;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,.2);z-index:99998;display:flex;align-items:center;justify-content:center;transition:transform .3s,box-shadow .3s;padding:0;overflow:hidden}' +
       '.cb-btn:hover{transform:scale(1.08);box-shadow:0 8px 28px rgba(0,0,0,.25)}' +
       '.cb-btn svg{width:28px;height:28px;fill:#fff}' +
+      // Launcher templates
+      '.cb-btn.style-default_bubble{width:60px;height:60px;border-radius:50%}' +
+      '.cb-btn.style-glowing_ring{width:60px;height:60px;border-radius:50%}' +
+      '.cb-btn.style-glowing_ring::after{content:"";position:absolute;width:100%;height:100%;border-radius:50%;border:2px solid var(--cb-primary);opacity:0;animation:cb-pulse 2s infinite;pointer-events:none;box-sizing:border-box}' +
+      '@keyframes cb-pulse{0%{transform:scale(1);opacity:0.8}100%{transform:scale(1.45);opacity:0}}' +
+      '.cb-btn.style-sleek_square{width:56px;height:56px;border-radius:14px}' +
+      '.cb-btn.style-modern_pill{width:auto;height:48px;border-radius:24px;padding:0 18px;display:flex;align-items:center;gap:8px}' +
       // Widget box
       '.cb-box{position:fixed;bottom:90px;right:' + posRight + ';left:' + posLeft + ';width:380px;max-width:calc(100vw - 40px);height:560px;max-height:calc(100vh - 120px);background:' + (isDark ? '#1e293b' : '#fff') + ';border-radius:var(--cb-radius);box-shadow:var(--cb-shadow);z-index:99999;display:none;flex-direction:column;overflow:hidden;font-family:var(--cb-font)}' +
       '.cb-box.open{display:flex;animation:cb-up .28s cubic-bezier(.22,.68,0,1.2)}' +
@@ -344,10 +358,37 @@ router.get('/embed.js', (req, res) => {
       '.cb-callout{position:fixed;bottom:92px;right:' + posRight + ';left:' + posLeft + ';background:#fff;color:#0f172a;padding:11px 15px;border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.14);z-index:99997;font-size:13px;font-family:var(--cb-font);max-width:260px;display:flex;align-items:center;gap:8px;border:1px solid #e2e8f0;cursor:pointer;animation:cb-up .3s ease;line-height:1.4}' +
       '.cb-callout-x{background:none;border:none;color:#94a3b8;cursor:pointer;font-size:15px;padding:0;margin-left:auto;line-height:1}' +
       '.cb-callout-x:hover{color:#64748b}' +
-      // Feedback card
-      '.cb-feedback{background:' + (isDark ? '#1e293b' : '#fff') + ';border:1px solid ' + (isDark ? '#334155' : '#e2e8f0') + ';border-radius:14px;padding:18px 16px;margin:4px 0;box-shadow:0 2px 12px rgba(0,0,0,.08);animation:cb-up .25s ease}' +
+      // Upgraded Feedback Card
+      '.cb-feedback{background:' + (isDark ? '#1e293b' : '#fff') + ';border:1px solid ' + (isDark ? '#334155' : '#e2e8f0') + ';border-radius:14px;padding:18px 16px;margin:4px 0;box-shadow:0 2px 12px rgba(0,0,0,.08);animation:cb-up .25s ease;position:relative}' +
       '.cb-feedback-title{font-size:14px;font-weight:700;color:' + (isDark ? '#f1f5f9' : '#1e293b') + ';margin-bottom:4px}' +
       '.cb-feedback-sub{font-size:12px;color:' + (isDark ? '#94a3b8' : '#64748b') + ';margin-bottom:14px}' +
+      '.cb-fb-opts{display:flex;gap:10px;justify-content:center}' +
+      '.cb-fb-btn{display:flex;flex-direction:column;align-items:center;gap:6px;background:none;border:1.5px solid ' + (isDark ? '#334155' : '#e2e8f0') + ';border-radius:12px;padding:12px 16px;cursor:pointer;transition:all .2s;min-width:72px;font-family:inherit}' +
+      '.cb-fb-btn:hover{border-color:var(--cb-primary);background:' + activePrimaryColor + '10;transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.1)}' +
+      '.cb-fb-btn.selected{border-color:var(--cb-primary);background:var(--cb-primary);color:#fff}' +
+      '.cb-fb-btn.selected .cb-fb-label{color:#fff}' +
+      '.cb-fb-icon{width:32px;height:32px;object-fit:contain}' +
+      '.cb-fb-icon-svg{width:32px;height:32px}' +
+      '.cb-fb-label{font-size:11px;font-weight:600;color:' + (isDark ? '#94a3b8' : '#64748b') + ';text-align:center;line-height:1.3}' +
+      '.cb-fb-thanks{text-align:center;padding:8px 0;font-size:13px;color:' + (isDark ? '#86efac' : '#16a34a') + ';font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px}' +
+      '.cb-fb-comment{width:100%;border:1.5px solid ' + (isDark ? '#475569' : '#e2e8f0') + ';border-radius:8px;padding:8px 12px;font-size:13px;outline:none;resize:none;font-family:inherit;background:' + (isDark ? '#1e293b' : '#f8fafc') + ';color:inherit;margin-top:10px;height:60px}' +
+      '.cb-fb-comment:focus{border-color:var(--cb-primary);box-shadow:0 0 0 3px ' + activePrimaryColor + '18}' +
+      '.cb-fb-submit{background:var(--cb-primary);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer;transition:transform .15s}' +
+      '.cb-fb-submit:hover{transform:scale(1.05)}' +
+      '.cb-fb-skip-link{background:none;border:none;color:' + (isDark ? '#94a3b8' : '#64748b') + ';cursor:pointer;font-size:12.5px;font-weight:500;text-decoration:underline}' +
+      '.cb-fb-skip-link:hover{color:var(--cb-primary)}' +
+      '.cb-fb-top-skip{background:none;border:none;color:' + (isDark ? '#64748b' : '#94a3b8') + ';cursor:pointer;font-size:11px;font-weight:600;position:absolute;top:12px;right:14px;text-transform:uppercase;letter-spacing:.5px}' +
+      '.cb-fb-top-skip:hover{color:#ef4444}' +
+      // Lead Collection Card (Interactive Form Card Inline)
+      '.cb-lead-card{background:' + (isDark ? '#27354a' : '#ffffff') + ';border:1.5px dashed ' + (isDark ? '#3b4f6a' : '#cbd5e1') + ';border-radius:12px;padding:14px;margin:6px 0 6px 36px;animation:cb-up .25s ease;display:flex;flex-direction:column;gap:8px;max-width:80%;box-shadow:0 3px 10px rgba(0,0,0,0.03)}' +
+      '.cb-lead-title{font-size:12px;font-weight:700;color:' + (isDark ? '#93c5fd' : '#1e3a8a') + ';text-transform:uppercase;letter-spacing:.5px}' +
+      '.cb-lead-input-row{display:flex;gap:6px;width:100%}' +
+      '.cb-lead-input-field{flex:1;border:1.5px solid ' + (isDark ? '#475569' : '#cbd5e1') + ';border-radius:8px;padding:8px 12px;font-size:13.5px;outline:none;background:' + (isDark ? '#1e293b' : '#f8fafc') + ';color:' + (isDark ? '#f1f5f9' : '#1e293b') + ';font-family:inherit}' +
+      '.cb-lead-input-field:focus{border-color:var(--cb-primary);box-shadow:0 0 0 3px ' + activePrimaryColor + '18}' +
+      '.cb-lead-input-submit{background:var(--cb-primary);border:none;border-radius:8px;width:36px;height:36px;min-width:36px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform .15s}' +
+      '.cb-lead-input-submit:hover{transform:scale(1.06)}' +
+      '.cb-lead-input-submit svg{width:16px;height:16px;fill:#fff}' +
+      '.cb-lead-error{font-size:11px;color:#ef4444;font-weight:500;display:none}' +
       '.cb-fb-opts{display:flex;gap:10px;justify-content:center}' +
       '.cb-fb-btn{display:flex;flex-direction:column;align-items:center;gap:6px;background:none;border:1.5px solid ' + (isDark ? '#334155' : '#e2e8f0') + ';border-radius:12px;padding:12px 16px;cursor:pointer;transition:all .2s;min-width:72px;font-family:inherit}' +
       '.cb-fb-btn:hover{border-color:var(--cb-primary);background:' + activePrimaryColor + '10;transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.1)}' +
@@ -368,12 +409,21 @@ router.get('/embed.js', (req, res) => {
 
     // ── Launcher button ──────────────────────────────────────────────────────────
     var btn = document.createElement('button');
-    btn.className = 'cb-btn';
+    btn.className = 'cb-btn style-' + launcherStyle;
     btn.setAttribute('aria-label', 'Open chat');
-    if (activeLauncherIcon) {
-      btn.innerHTML = '<img src="' + activeLauncherIcon + '" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" />';
+
+    var iconHtml = activeLauncherIcon
+      ? '<img src="' + activeLauncherIcon + '" style="width:28px;height:28px;border-radius:50%;object-fit:cover;" />'
+      : '<svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:#fff;"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>';
+
+    if (launcherStyle === 'modern_pill') {
+      btn.innerHTML = iconHtml + '<span style="font-size:13.5px;font-weight:600;color:#fff;white-space:nowrap;margin-left:4px;">' + launcherPillText + '</span>';
     } else {
-      btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>';
+      if (activeLauncherIcon) {
+        btn.innerHTML = '<img src="' + activeLauncherIcon + '" style="width:100%;height:100%;border-radius:inherit;object-fit:cover;" />';
+      } else {
+        btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>';
+      }
     }
     document.body.appendChild(btn);
 
@@ -545,6 +595,7 @@ router.get('/embed.js', (req, res) => {
       }
 
       card.innerHTML =
+        '<button class="cb-fb-top-skip" title="Skip Feedback">Skip</button>' +
         '<div class="cb-feedback-title">How was your experience?</div>' +
         '<div class="cb-feedback-sub">Rate your chat with ' + botName + ' today</div>' +
         '<div class="cb-fb-opts">' +
@@ -560,28 +611,132 @@ router.get('/embed.js', (req, res) => {
             makeIconHtml(feedbackGoodUrl, svgGood) +
             '<span class="cb-fb-label">Satisfied</span>' +
           '</button>' +
+        '</div>' +
+        '<div class="cb-fb-comment-wrap" style="display:none;margin-top:12px;">' +
+          '<textarea class="cb-fb-comment" placeholder="What can we improve? (Optional)"></textarea>' +
+          '<div style="display:flex;align-items:center;gap:12px;margin-top:8px;">' +
+            '<button class="cb-fb-submit">Submit</button>' +
+            '<button class="cb-fb-skip-link">Skip</button>' +
+          '</div>' +
         '</div>';
 
       msgs.appendChild(card);
       msgs.scrollTop = msgs.scrollHeight;
 
+      var selectedRating = null;
+      var selectedLabel = '';
+
+      function dismissFeedback(withThanks) {
+        if (withThanks) {
+          card.innerHTML = '<div class="cb-fb-thanks"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#dcfce7" stroke="#86efac" stroke-width="1.5"/><path d="M7 12l3 3 6-6" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Thanks for your feedback!</div>';
+        } else {
+          card.remove();
+        }
+        msgs.scrollTop = msgs.scrollHeight;
+      }
+
+      card.querySelector('.cb-fb-top-skip').onclick = function() {
+        fetch(SERVER_URL + '/widget/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: sessionId, botId: config.id, rating: null, label: 'Skipped' })
+        }).catch(function() {});
+        dismissFeedback(false);
+      };
+
+      card.querySelector('.cb-fb-skip-link').onclick = function() {
+        fetch(SERVER_URL + '/widget/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: sessionId, botId: config.id, rating: selectedRating, label: selectedLabel, comment: '' })
+        }).catch(function() {});
+        dismissFeedback(true);
+      };
+
       card.querySelectorAll('.cb-fb-btn').forEach(function(b) {
         b.onclick = function() {
-          var rating = b.getAttribute('data-rating');
-          var label  = b.getAttribute('data-label');
+          selectedRating = b.getAttribute('data-rating');
+          selectedLabel  = b.getAttribute('data-label');
           card.querySelectorAll('.cb-fb-btn').forEach(function(x) { x.classList.remove('selected'); });
           b.classList.add('selected');
-          setTimeout(function() {
-            card.innerHTML = '<div class="cb-fb-thanks"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#dcfce7" stroke="#86efac" stroke-width="1.5"/><path d="M7 12l3 3 6-6" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Thanks for your feedback!</div>';
-            msgs.scrollTop = msgs.scrollHeight;
-          }, 500);
-          fetch(SERVER_URL + '/widget/feedback', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sessionId: sessionId, botId: config.id, rating: rating, label: label })
-          }).catch(function() {});
+          
+          // Reveal comments area
+          var commentWrap = card.querySelector('.cb-fb-comment-wrap');
+          commentWrap.style.display = 'block';
+          msgs.scrollTop = msgs.scrollHeight;
         };
       });
+
+      card.querySelector('.cb-fb-submit').onclick = function() {
+        var comment = card.querySelector('.cb-fb-comment').value.trim();
+        fetch(SERVER_URL + '/widget/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: sessionId,
+            botId: config.id,
+            rating: selectedRating,
+            label: selectedLabel,
+            comment: comment
+          })
+        }).catch(function() {});
+        dismissFeedback(true);
+      };
+    }
+
+    // ── Inline Contact/Lead input box ─────────────────────────────────────────────
+    function renderLeadCard(fieldId, label) {
+      var existingCard = msgs.querySelector('.cb-lead-card[data-field="' + fieldId + '"]');
+      if (existingCard) return;
+
+      var card = document.createElement('div');
+      card.className = 'cb-lead-card';
+      card.setAttribute('data-field', fieldId);
+
+      var placeholder = 'Enter your ' + label.toLowerCase() + '...';
+      var inputType = 'text';
+      if (fieldId === 'email') inputType = 'email';
+      if (fieldId === 'phone') inputType = 'tel';
+
+      card.innerHTML =
+        '<div class="cb-lead-title">Provide ' + label + '</div>' +
+        '<div class="cb-lead-input-row">' +
+          '<input type="' + inputType + '" class="cb-lead-input-field" placeholder="' + placeholder + '" />' +
+          '<button class="cb-lead-input-submit">' +
+            '<svg viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>' +
+          '</button>' +
+        '</div>';
+
+      msgs.appendChild(card);
+      msgs.scrollTop = msgs.scrollHeight;
+
+      var input = card.querySelector('.cb-lead-input-field');
+      var submitBtn = card.querySelector('.cb-lead-input-submit');
+
+      input.focus();
+
+      function submitVal() {
+        var val = input.value.trim();
+        if (!val) return;
+
+        submitBtn.disabled = true;
+        input.disabled = true;
+
+        inp.value = val;
+        sendMsg();
+
+        setTimeout(function() {
+          card.remove();
+        }, 1000);
+      }
+
+      submitBtn.onclick = submitVal;
+      input.onkeypress = function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitVal();
+        }
+      };
     }
 
     // ── Send message ──────────────────────────────────────────────────────────────
@@ -671,6 +826,11 @@ router.get('/embed.js', (req, res) => {
                 } else if (data.type === 'start' && data.sessionId) {
                   sessionId = data.sessionId;
                   localStorage.setItem(sessionKey, sessionId);
+                } else if (data.type === 'done') {
+                  botTs.textContent = nowTime();
+                  if (data.leadField) {
+                    renderLeadCard(data.leadField, data.leadLabel);
+                  }
                 } else if (data.type === 'error') {
                   if (isFirstToken) botBubble.innerHTML = '';
                   botBubble.textContent = 'Sorry, something went wrong.';
