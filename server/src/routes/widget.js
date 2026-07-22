@@ -77,9 +77,49 @@ router.get('/embed.js', (req, res) => {
   if (window.__chatbotWidgetLoaded) return;
   window.__chatbotWidgetLoaded = true;
 
-  var SERVER_URL = '${serverUrl}';
-  var scriptTag = document.currentScript || document.querySelector('script[data-chatbot-id]');
-  var botId = scriptTag ? scriptTag.getAttribute('data-chatbot-id') : null;
+  function onReady(fn) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', fn);
+    } else {
+      fn();
+    }
+  }
+
+  function appendToRoot(el) {
+    var root = document.body || document.documentElement;
+    if (!root) return false;
+    try {
+      root.appendChild(el);
+      return true;
+    } catch (e) {}
+    try {
+      document.documentElement.appendChild(el);
+      return true;
+    } catch (e) {}
+    try {
+      document.body.appendChild(el);
+      return true;
+    } catch (e) {}
+    try {
+      document.documentElement.insertBefore(el, document.documentElement.firstChild);
+      return true;
+    } catch (e) {}
+    return false;
+  }
+
+  function addToRoot(el) {
+    if (appendToRoot(el)) return;
+    try {
+      if (document.documentElement) document.documentElement.insertBefore(el, document.documentElement.firstChild);
+    } catch (e) {
+      try { document.body && document.body.appendChild(el); } catch (_e) {}
+    }
+  }
+
+  onReady(function() {
+    var SERVER_URL = '${serverUrl}';
+    var scriptTag = document.currentScript || document.querySelector('script[data-chatbot-id]');
+    var botId = scriptTag ? scriptTag.getAttribute('data-chatbot-id') : null;
 
   var sessionKey = 'chatbot_session_' + (botId || 'default');
   var sessionId = localStorage.getItem(sessionKey);
@@ -89,13 +129,58 @@ router.get('/embed.js', (req, res) => {
   }
 
   var configUrl = botId ? SERVER_URL + '/widget/config/' + botId : SERVER_URL + '/widget/config';
-  fetch(configUrl)
-    .then(function(r) { return r.json(); })
-    .then(function(config) {
-      if (!config.isActive) return;
-      initWidget(config);
-    })
-    .catch(function(err) { console.error('Chatbot widget error:', err); });
+  var retryPlaceholder = null;
+  var pendingConfig = false;
+
+  function createPlaceholder() {
+    if (document.getElementById('cb-placeholder-btn')) return;
+    try {
+      var ph = document.createElement('button');
+      ph.type = 'button';
+      ph.id = 'cb-placeholder-btn';
+      ph.className = 'cb-btn';
+      ph.style.cssText = 'width:56px!important;height:56px!important;border-radius:50%!important;position:fixed!important;bottom:20px!important;right:20px!important;z-index:2147483647!important;background:#6366f1!important;color:#ffffff!important;display:flex!important;align-items:center!important;justify-content:center!important;cursor:pointer!important;pointer-events:auto!important;';
+      ph.title = 'Loading chat widget...';
+      ph.innerHTML = '<svg viewBox="0 0 24 24" style="width:22px;height:22px;fill:currentColor;display:block;margin:auto"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>';
+      ph.onclick = function () {
+        if (!pendingConfig) {
+          pendingConfig = true;
+          ph.title = 'Retry loading chat widget';
+          loadConfig();
+        }
+      };
+      retryPlaceholder = ph;
+      addToRoot(ph);
+    } catch (e) {
+      /* ignore DOM errors on very restricted pages */
+    }
+  }
+
+  function removePlaceholder() {
+    var ph = document.getElementById('cb-placeholder-btn');
+    if (ph) ph.remove();
+  }
+
+  function loadConfig() {
+    return fetch(configUrl)
+      .then(function(r) { return r.json(); })
+      .then(function(config) {
+        pendingConfig = false;
+        if (!config.isActive) return;
+        removePlaceholder();
+        initWidget(config);
+      })
+      .catch(function(err) {
+        pendingConfig = false;
+        console.error('Chatbot widget error:', err);
+        if (retryPlaceholder) {
+          retryPlaceholder.title = 'Retry loading chat widget';
+        }
+      });
+  }
+
+  createPlaceholder();
+  loadConfig();
 
   function initWidget(config) {
     var theme = {};
@@ -433,8 +518,11 @@ router.get('/embed.js', (req, res) => {
 
     // ── Launcher button ──────────────────────────────────────────────────────────
     var btn = document.createElement('button');
+    btn.id = 'cb-launcher-btn';
+    btn.type = 'button';
     btn.className = 'cb-btn style-' + launcherStyle;
     btn.setAttribute('aria-label', 'Open chat');
+    btn.style.cssText = 'position:fixed!important;bottom:20px!important;right:' + posRight + '!important;left:' + posLeft + '!important;z-index:2147483647!important;display:flex!important;align-items:center!important;justify-content:center!important;cursor:pointer!important;transition:transform .3s,box-shadow .3s!important;padding:0!important;overflow:hidden!important;background:var(--cb-primary)!important;color:#fff!important;border:none!important;pointer-events:auto!important;';
 
     var iconHtml = activeLauncherIcon
       ? '<img src="' + activeLauncherIcon + '" style="width:28px;height:28px;border-radius:50%;object-fit:cover;" />'
@@ -449,7 +537,11 @@ router.get('/embed.js', (req, res) => {
         btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>';
       }
     }
-    document.body.appendChild(btn);
+    btn.style.position = 'fixed';
+    btn.style.zIndex = '2147483647';
+    if (!appendToRoot(btn)) {
+      addToRoot(btn);
+    }
 
     // ── Widget box ───────────────────────────────────────────────────────────────
     var box = document.createElement('div');
@@ -485,7 +577,7 @@ router.get('/embed.js', (req, res) => {
         disclaimerHtml +
       '</div>';
 
-    document.body.appendChild(box);
+    appendToRoot(box);
 
     var msgs  = box.querySelector('.cb-msgs');
     var inp   = box.querySelector('.cb-inp');
@@ -557,7 +649,7 @@ router.get('/embed.js', (req, res) => {
         rec.onend = function() {
           if (isRecording && !manualStop) {
             try {
-              // prefer restarting via the shared `recognition` variable
+              // prefer restarting via the shared recognition variable
               if (recognition) {
                 recognition.start();
                 return;
