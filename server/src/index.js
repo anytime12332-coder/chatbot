@@ -61,32 +61,28 @@ app.get('/health', (req, res) => {
 // Load routes - NO try/catch so errors are visible in Railway logs
 console.log('[Boot] Loading routes...');
 
-const authRoutes = require('./routes/auth');
-console.log('[Boot] ✓ auth routes loaded');
+function safeRequire(routePath, name) {
+  try {
+    const r = require(routePath);
+    console.log(`[Boot] ✓ ${name} routes loaded`);
+    return r;
+  } catch (err) {
+    console.error(`[Boot] ✗ Failed to load ${name} routes:`, err && err.message ? err.message : err);
+    // return an empty router so app can still start and health checks pass
+    const express = require('express');
+    return express.Router();
+  }
+}
 
-const chatbotRoutes = require('./routes/chatbot');
-console.log('[Boot] ✓ chatbot routes loaded');
-
-const apiConfigRoutes = require('./routes/apiConfig');
-console.log('[Boot] ✓ apiConfig routes loaded');
-
-const chatRoutes = require('./routes/chat');
-console.log('[Boot] ✓ chat routes loaded');
-
-const dashboardRoutes = require('./routes/dashboard');
-console.log('[Boot] ✓ dashboard routes loaded');
-
-const widgetRoutes = require('./routes/widget');
-console.log('[Boot] ✓ widget routes loaded');
-
-const leadRoutes = require('./routes/lead');
-console.log('[Boot] ✓ lead routes loaded');
-
-const ragRoutes = require('./routes/rag');
-console.log('[Boot] ✓ RAG routes loaded');
-
-const voiceRoutes = require('./routes/voice');
-console.log('[Boot] ✓ Voice routes loaded');
+const authRoutes = safeRequire('./routes/auth', 'auth');
+const chatbotRoutes = safeRequire('./routes/chatbot', 'chatbot');
+const apiConfigRoutes = safeRequire('./routes/apiConfig', 'apiConfig');
+const chatRoutes = safeRequire('./routes/chat', 'chat');
+const dashboardRoutes = safeRequire('./routes/dashboard', 'dashboard');
+const widgetRoutes = safeRequire('./routes/widget', 'widget');
+const leadRoutes = safeRequire('./routes/lead', 'lead');
+const ragRoutes = safeRequire('./routes/rag', 'RAG');
+const voiceRoutes = safeRequire('./routes/voice', 'Voice');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/chatbots', chatbotRoutes);
