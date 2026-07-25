@@ -117,15 +117,38 @@ router.get('/embed.js', (req, res) => {
   }
 
   onReady(function() {
-    var SERVER_URL = '${serverUrl}';
     var scriptTag = document.currentScript || document.querySelector('script[data-chatbot-id]');
+    var SERVER_URL = '${serverUrl}';
+    if (scriptTag && scriptTag.src) {
+      try {
+        SERVER_URL = new URL(scriptTag.src, window.location.href).origin;
+      } catch (e) {
+        // fallback to server URL from embed endpoint
+      }
+    }
     var botId = scriptTag ? scriptTag.getAttribute('data-chatbot-id') : null;
 
   var sessionKey = 'chatbot_session_' + (botId || 'default');
-  var sessionId = localStorage.getItem(sessionKey);
+  var sessionId = null;
+  function safeGetStorage(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch (e) {
+      return null;
+    }
+  }
+  function safeSetStorage(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      return false;
+    }
+    return true;
+  }
+  sessionId = safeGetStorage(sessionKey);
   if (!sessionId) {
     sessionId = 'sess_' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
-    localStorage.setItem(sessionKey, sessionId);
+    safeSetStorage(sessionKey, sessionId);
   }
 
   var configUrl = botId ? SERVER_URL + '/widget/config/' + botId : SERVER_URL + '/widget/config';
@@ -608,111 +631,99 @@ router.get('/embed.js', (req, res) => {
     var micBtn = box.querySelector('.cb-mic');
     var voiceWave = box.querySelector('.cb-voice-wave');
     var voiceClose = box.querySelector('.cb-voice-close');
-    var isRecording = false, manualStop = false, recognition = null;
+    var isRecording = false, manualStop = false;
 
     if (micBtn && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
-      var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      var SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-      function createRecognition() {
-        var rec = new SpeechRecognition();
-        rec.continuous = true;
-        rec.interimResults = true;
-        rec.lang = voiceObj.language || 'en-US';
+      function buildRec() {
+        var r = new SpeechRecognitionAPI();
+        r.continuous = true;
+        r.interimResults = true;
+        r.lang = (voiceObj && voiceObj.language) ? voiceObj.language : 'en-US';
 
-        rec.onstart = function() {
-          isRecording = true;
-          micBtn.classList.add('recording');
-          if (voiceWave) voiceWave.style.display = 'flex';
-        };
-
-        rec.onresult = function(event) {
-          var transcript = '';
+        r.onresult = function(event) {
+          var t = '';
           for (var i = 0; i < event.results.length; i++) {
-            transcript += event.results[i][0].transcript;
+            t += event.results[i][0].transcript;
           }
-          if (transcript.trim()) {
-            inp.value = transcript;
+          if (t.trim()) {
+            inp.value = t;
             inp.style.height = 'auto';
             inp.style.height = Math.min(inp.scrollHeight, 90) + 'px';
           }
         };
 
-        rec.onerror = function(event) {
-          if (event.error === 'no-speech' || event.error === 'audio-capture') {
-            return;
-          }
-          if (event.error !== 'aborted') {
-            console.warn('Speech recognition error:', event.error);
-          }
+        r.onerror = function(ev) {
+          // ignore benign errors — the onend below will handle restart
+          if (ev.error === 'aborted') return;
+          if (ev.error === 'no-speech') return;
         };
 
-        rec.onend = function() {
+        r.onend = function() {
+          // If user didn't manually stop, restart with a BRAND NEW instance
+          // (Chrome invalidates the instance after onend fires)
           if (isRecording && !manualStop) {
             try {
-              // prefer restarting via the shared recognition variable
-              if (recognition) {
-                recognition.start();
-                return;
-              }
-              // fallback: recreate and start
-              recognition = createRecognition();
-              recognition.start();
-              return;
-            } catch(e) {
-              // swallow and fall through to finish
+              var next = buildRec();
+              next.start();
+            } catch (e) {
+              // couldn't restart — just stop cleanly
+              finishStop();
             }
+          } else {
+            finishStop();
           }
-          finishRecording();
         };
 
-        return rec;
+        return r;
       }
 
-      function finishRecording() {
+      function finishStop() {
         isRecording = false;
-        micBtn.classList.remove('recording');
+        try { micBtn.classList.remove('recording'); } catch(e) {}
         if (voiceWave) voiceWave.style.display = 'none';
-        if (voiceAutoSend && inp.value.trim() && manualStop) {
+        if (voiceAutoSend && manualStop && inp.value.trim()) {
           sendMsg();
         }
       }
 
-      function startRecording() {
+      function startVoice() {
         manualStop = false;
-        if (!recognition) {
-          recognition = createRecognition();
-        }
+        isRecording = true;
+        micBtn.classList.add('recording');
+        if (voiceWave) voiceWave.style.display = 'flex';
         try {
-          recognition.start();
+          buildRec().start();
         } catch(e) {
-          try {
-            recognition = createRecognition();
-            recognition.start();
-          } catch(err) {
-            console.error('Speech recognition start failed:', err);
-          }
+          isRecording = false;
+          micBtn.classList.remove('recording');
+          if (voiceWave) voiceWave.style.display = 'none';
+          console.warn('Voice start error:', e);
         }
       }
 
-      function stopRecording() {
+      function stopVoice() {
         manualStop = true;
+        // Let onend fire and call finishStop — just mark flag
+        // We don't have a reference to the active rec, so we use a passive stop
+        // by setting isRecording = false so onend sees it and calls finishStop
         isRecording = false;
-        if (recognition) {
-          try { recognition.stop(); } catch(e) {}
-        }
-        finishRecording();
+        // Visually reset immediately
+        try { micBtn.classList.remove('recording'); } catch(e) {}
+        if (voiceWave) voiceWave.style.display = 'none';
       }
 
       micBtn.onclick = function() {
         if (isRecording) {
-          stopRecording();
+          stopVoice();
         } else {
-          startRecording();
+          startVoice();
         }
       };
 
       if (voiceClose) {
-        voiceClose.onclick = stopRecording;
+        voiceClose.onclick = stopVoice;
       }
     }
 

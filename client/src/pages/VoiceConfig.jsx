@@ -113,65 +113,80 @@ export default function VoiceConfig() {
       return;
     }
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const rec = new SpeechRecognition();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = config.language || 'en-US';
+    manualStopRef.current = false;
+    setIsRecording(true);
+    setLiveTranscript('Listening to your speech...');
+    simulateAudioVisualizer();
 
-    rec.onstart = () => {
-      manualStopRef.current = false;
-      setIsRecording(true);
-      setLiveTranscript('Listening to your speech...');
-      simulateAudioVisualizer();
-    };
+    function launchRec() {
+      const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const rec = new SpeechRecognitionAPI();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = config.language || 'en-US';
 
-    rec.onresult = (event) => {
-      let currentText = '';
-      for (let i = 0; i < event.results.length; i++) {
-        currentText += event.results[i][0].transcript;
+      rec.onresult = (event) => {
+        let currentText = '';
+        for (let i = 0; i < event.results.length; i++) {
+          currentText += event.results[i][0].transcript;
+        }
+        if (currentText.trim()) {
+          setLiveTranscript(currentText);
+        }
+      };
+
+      rec.onerror = (event) => {
+        // ignore benign errors, onend will handle restart
+        if (event.error === 'aborted' || event.error === 'no-speech') return;
+        console.warn('Speech test error:', event.error);
+      };
+
+      rec.onend = () => {
+        // Only restart if user hasn't manually stopped
+        if (!manualStopRef.current) {
+          try {
+            // Must create a brand new instance — Chrome invalidates after onend
+            launchRec();
+          } catch(e) {
+            cleanupTest();
+          }
+        } else {
+          cleanupTest();
+        }
+      };
+
+      recognitionRef.current = rec;
+      try {
+        rec.start();
+      } catch (e) {
+        console.error('Failed to start speech test:', e);
+        cleanupTest();
       }
-      if (currentText.trim()) {
-        setLiveTranscript(currentText);
-      }
-    };
-
-    rec.onerror = (event) => {
-      if (event.error === 'no-speech' || event.error === 'audio-capture') {
-        return;
-      }
-      console.warn('Speech test error:', event.error);
-    };
-
-    rec.onend = () => {
-      if (!manualStopRef.current && recognitionRef.current) {
-        try {
-          // attempt to restart using the live reference (safer than reusing closed `rec` variable)
-          recognitionRef.current.start();
-          return;
-        } catch (_) {}
-      }
-      stopRecordingTest();
-    };
-
-    recognitionRef.current = rec;
-    try {
-      manualStopRef.current = false;
-      rec.start();
-    } catch (e) {
-      console.error('Failed to start speech test:', e);
     }
+
+    launchRec();
+  }
+
+  function cleanupTest() {
+    setIsRecording(false);
+    recognitionRef.current = null;
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    setAudioLevel(0);
   }
 
   function stopRecordingTest() {
-    setIsRecording(false);
     manualStopRef.current = true;
+    setIsRecording(false);
     if (recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch (_) {}
       recognitionRef.current = null;
     }
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
     }
     setAudioLevel(0);
   }
