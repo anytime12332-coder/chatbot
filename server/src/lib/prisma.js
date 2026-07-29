@@ -1,15 +1,14 @@
 const { PrismaClient } = require('@prisma/client');
 
+const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/chatbot';
+
 const prisma = new PrismaClient({
   log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
   datasources: {
     db: {
-      url: process.env.DATABASE_URL,
+      url: dbUrl,
     },
   },
 });
-
-// Connection pooling is handled by Prisma
-// For high concurrency, Prisma uses a connection pool by default
 
 module.exports = prisma;
