@@ -5,6 +5,13 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 
+process.on('unhandledRejection', (reason) => {
+  console.error('[Boot] Unhandled Rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[Boot] Uncaught Exception:', err);
+});
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 

@@ -40,6 +40,7 @@ echo "=== Step 3: Launching Server ==="\n\
 exec node src/index.js\n' > /app/start.sh && chmod +x /app/start.sh
 
 ENV NODE_ENV=production
+ENV PORT=3000
 
 EXPOSE 3000
 
