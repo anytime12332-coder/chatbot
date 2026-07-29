@@ -44,14 +44,18 @@ const generalLimiter = rateLimit({
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use(generalLimiter);
 
-app.use('/static', express.static(path.join(__dirname, '../public')));
-
-// Health check - first route
+// Health check endpoints - BEFORE rate limiting so deployment probes never fail
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.use(generalLimiter);
+
+app.use('/static', express.static(path.join(__dirname, '../public')));
 
 // Load routes - NO try/catch so errors are visible in Railway logs
 console.log('[Boot] Loading routes...');

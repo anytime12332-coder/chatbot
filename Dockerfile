@@ -32,11 +32,9 @@ COPY --from=frontend-build /app/client/dist /app/client/dist
 # 4. Start the server
 RUN printf '#!/bin/sh\n\
 cd /app/server\n\
-echo "=== Step 1: Database migration ==="\n\
-npx prisma migrate deploy 2>&1 || (echo "migrate failed, trying db push..." && npx prisma db push --accept-data-loss 2>&1) || echo "WARNING: DB sync failed"\n\
-echo "=== Step 2: Seed database ==="\n\
-node src/seed.js 2>&1 || echo "WARNING: Seed failed"\n\
-echo "=== Step 3: Start server ==="\n\
+echo "=== Step 1: Triggering Async DB Migration & Seeding ==="\n\
+(npx prisma migrate deploy 2>&1 || (echo "migrate failed, trying db push..." && npx prisma db push --accept-data-loss 2>&1); node src/seed.js 2>&1 || true) &\n\
+echo "=== Step 2: Starting HTTP Server Immediately for Instant Healthcheck ==="\n\
 exec node src/index.js\n' > /app/start.sh && chmod +x /app/start.sh
 
 ENV NODE_ENV=production
