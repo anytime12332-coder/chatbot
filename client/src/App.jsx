@@ -11,10 +11,6 @@ import ApiConfig from './pages/ApiConfig';
 import EmbedCode from './pages/EmbedCode';
 import Conversations from './pages/Conversations';
 import Settings from './pages/Settings';
-import Leads from './pages/Leads';
-import LeadsConfig from './pages/LeadsConfig';
-import RagSettings from './pages/RagSettings';
-import VoiceConfig from './pages/VoiceConfig';
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -43,13 +39,9 @@ export default function App() {
                   <Route path="/chatbots" element={<ChatbotList />} />
                   <Route path="/bot/:botId/dashboard" element={<BotDashboard />} />
                   <Route path="/bot/:botId/config" element={<BotConfig />} />
-                  <Route path="/bot/:botId/voice" element={<VoiceConfig />} />
-                  <Route path="/bot/:botId/rag" element={<RagSettings />} />
                   <Route path="/bot/:botId/api" element={<ApiConfig />} />
                   <Route path="/bot/:botId/embed" element={<EmbedCode />} />
                   <Route path="/bot/:botId/conversations" element={<Conversations />} />
-                  <Route path="/bot/:botId/leads" element={<Leads />} />
-                  <Route path="/bot/:botId/leads-config" element={<LeadsConfig />} />
                   <Route path="/settings" element={<Settings />} />
                   <Route path="*" element={<Navigate to="/" />} />
                 </Routes>

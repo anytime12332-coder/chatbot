@@ -12,12 +12,14 @@ export function BotProvider({ children }) {
     try {
       const data = await api.get('/chatbots');
       setBots(data);
-      // Use the functional updater so we always read the current activeBot
-      // instead of a value captured by the empty-deps useCallback closure.
-      setActiveBot(prev => {
-        if (!prev) return data.length > 0 ? data[0] : null;
-        return data.find(b => b.id === prev.id) || prev;
-      });
+      // Auto-select first bot if none selected
+      if (!activeBot && data.length > 0) {
+        setActiveBot(data[0]);
+      } else if (activeBot) {
+        // Refresh active bot data
+        const updated = data.find(b => b.id === activeBot.id);
+        if (updated) setActiveBot(updated);
+      }
     } catch (err) {
       console.error('Load bots error:', err);
     } finally {

@@ -8,11 +8,6 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Behind a reverse proxy (Railway, Heroku, Nginx). Required so req.ip and
-// express-rate-limit use the real client IP from X-Forwarded-For instead of
-// the proxy IP (otherwise all users share one rate-limit bucket).
-app.set('trust proxy', 1);
-
 console.log('[Boot] Starting AI Chatbot Server...');
 console.log('[Boot] NODE_ENV:', process.env.NODE_ENV);
 console.log('[Boot] PORT:', PORT);
@@ -61,37 +56,29 @@ app.get('/health', (req, res) => {
 // Load routes - NO try/catch so errors are visible in Railway logs
 console.log('[Boot] Loading routes...');
 
-function safeRequire(routePath, name) {
-  try {
-    const r = require(routePath);
-    console.log(`[Boot] ✓ ${name} routes loaded`);
-    return r;
-  } catch (err) {
-    console.error(`[Boot] ✗ Failed to load ${name} routes:`, err && err.message ? err.message : err);
-    // return an empty router so app can still start and health checks pass
-    const express = require('express');
-    return express.Router();
-  }
-}
+const authRoutes = require('./routes/auth');
+console.log('[Boot] ✓ auth routes loaded');
 
-const authRoutes = safeRequire('./routes/auth', 'auth');
-const chatbotRoutes = safeRequire('./routes/chatbot', 'chatbot');
-const apiConfigRoutes = safeRequire('./routes/apiConfig', 'apiConfig');
-const chatRoutes = safeRequire('./routes/chat', 'chat');
-const dashboardRoutes = safeRequire('./routes/dashboard', 'dashboard');
-const widgetRoutes = safeRequire('./routes/widget', 'widget');
-const leadRoutes = safeRequire('./routes/lead', 'lead');
-const ragRoutes = safeRequire('./routes/rag', 'RAG');
-const voiceRoutes = safeRequire('./routes/voice', 'Voice');
+const chatbotRoutes = require('./routes/chatbot');
+console.log('[Boot] ✓ chatbot routes loaded');
+
+const apiConfigRoutes = require('./routes/apiConfig');
+console.log('[Boot] ✓ apiConfig routes loaded');
+
+const chatRoutes = require('./routes/chat');
+console.log('[Boot] ✓ chat routes loaded');
+
+const dashboardRoutes = require('./routes/dashboard');
+console.log('[Boot] ✓ dashboard routes loaded');
+
+const widgetRoutes = require('./routes/widget');
+console.log('[Boot] ✓ widget routes loaded');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/chatbots', chatbotRoutes);
 app.use('/api/api-config', apiConfigRoutes);
 app.use('/api/chat', chatLimiter, chatRoutes);
 app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/leads', leadRoutes);
-app.use('/api/rag', ragRoutes);
-app.use('/api/voice', voiceRoutes);
 app.use('/widget', widgetRoutes);
 
 console.log('[Boot] ✓ All routes registered');

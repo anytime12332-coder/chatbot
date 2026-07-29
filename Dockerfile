@@ -1,7 +1,5 @@
 # Stage 1: Build frontend
 FROM node:18-alpine AS frontend-build
-# Prisma on Alpine needs OpenSSL present to detect the correct engine
-RUN apk add --no-cache openssl
 WORKDIR /app/client
 COPY client/package.json client/package-lock.json* ./
 RUN npm install
@@ -10,8 +8,6 @@ RUN npm run build
 
 # Stage 2: Production server
 FROM node:18-alpine AS production
-# Prisma 5.x query engine requires OpenSSL at runtime on Alpine (musl)
-RUN apk add --no-cache openssl
 WORKDIR /app
 
 # Install server dependencies
@@ -37,7 +33,7 @@ COPY --from=frontend-build /app/client/dist /app/client/dist
 RUN printf '#!/bin/sh\n\
 cd /app/server\n\
 echo "=== Step 1: Database migration ==="\n\
-npx prisma db push --accept-data-loss 2>&1 || echo "WARNING: DB sync failed"\n\
+npx prisma migrate deploy 2>&1 || (echo "migrate failed, trying db push..." && npx prisma db push --accept-data-loss 2>&1) || echo "WARNING: DB sync failed"\n\
 echo "=== Step 2: Seed database ==="\n\
 node src/seed.js 2>&1 || echo "WARNING: Seed failed"\n\
 echo "=== Step 3: Start server ==="\n\

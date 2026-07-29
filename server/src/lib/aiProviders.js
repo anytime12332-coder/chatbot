@@ -40,35 +40,6 @@ const PROVIDER_CONFIGS = {
   },
 };
 
-/**
- * OpenRouter requires namespaced model IDs (e.g. "openai/gpt-3.5-turbo").
- * The DB default model is the bare "gpt-3.5-turbo", which OpenRouter rejects.
- * Normalize bare/empty models to valid OpenRouter IDs.
- */
-function normalizeOpenRouterModel(model) {
-  const fallback = PROVIDER_CONFIGS.openrouter.defaultModel;
-  if (!model) return fallback;
-  // Already namespaced (contains a provider prefix like "openai/")
-  if (model.includes('/')) return model;
-  // Map common bare OpenAI model names to their OpenRouter equivalents
-  return `openai/${model}`;
-}
-
-/**
- * Build OpenRouter headers. OpenRouter validates HTTP-Referer and expects
- * X-Title. A hardcoded placeholder domain causes 401/403 rejections, so
- * derive the referer from the environment.
- */
-function openRouterHeaders(apiKey) {
-  const referer = process.env.APP_URL || process.env.CORS_ORIGIN || 'http://localhost:5173';
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${apiKey}`,
-    'HTTP-Referer': referer,
-    'X-Title': process.env.APP_NAME || 'Chatbot SaaS',
-  };
-}
-
 function makeRequest(url, options, body) {
   return new Promise((resolve, reject) => {
     const parsedUrl = new URL(url);
@@ -230,10 +201,14 @@ async function callOpenRouter(messages, config) {
     PROVIDER_CONFIGS.openrouter.baseUrl,
     {
       method: 'POST',
-      headers: openRouterHeaders(config.apiKey),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`,
+        'HTTP-Referer': 'https://chatbot-saas.railway.app',
+      },
     },
     {
-      model: normalizeOpenRouterModel(config.model),
+      model: config.model || PROVIDER_CONFIGS.openrouter.defaultModel,
       messages,
       max_tokens: config.maxTokens || 1024,
       temperature: config.temperature || 0.7,
@@ -289,16 +264,10 @@ async function getAIResponse(messages, config) {
  */
 async function streamOpenAICompatible(url, headers, body, onChunk) {
   body.stream = true;
-  // Request usage statistics in stream if supported (OpenAI)
-  if (url.includes('api.openai.com')) {
-    body.stream_options = { include_usage: true };
-  }
-
   const stream = await makeStreamRequest(url, { method: 'POST', headers }, body);
 
   let fullContent = '';
   let buffer = '';
-  let tokenCount = 0;
 
   return new Promise((resolve, reject) => {
     stream.on('data', (chunk) => {
@@ -319,9 +288,6 @@ async function streamOpenAICompatible(url, headers, body, onChunk) {
             fullContent += delta;
             onChunk(delta);
           }
-          if (parsed.usage) {
-            tokenCount = parsed.usage.total_tokens;
-          }
         } catch (e) {
           // skip unparseable chunks
         }
@@ -329,13 +295,7 @@ async function streamOpenAICompatible(url, headers, body, onChunk) {
     });
 
     stream.on('end', () => {
-      // Estimate token count if API did not return usage info
-      if (tokenCount === 0) {
-        const inputStr = (body.messages || []).map(m => m.content).join(' ');
-        const chars = inputStr.length + fullContent.length;
-        tokenCount = Math.round(chars / 4) || 1;
-      }
-      resolve({ content: fullContent, tokenCount });
+      resolve({ content: fullContent, tokenCount: 0 });
     });
 
     stream.on('error', reject);
@@ -435,9 +395,13 @@ async function getAIResponseStreaming(messages, config, onChunk) {
     case 'openrouter':
       return streamOpenAICompatible(
         PROVIDER_CONFIGS.openrouter.baseUrl,
-        openRouterHeaders(config.apiKey),
         {
-          model: normalizeOpenRouterModel(config.model),
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.apiKey}`,
+          'HTTP-Referer': 'https://chatbot-saas.railway.app',
+        },
+        {
+          model: config.model || PROVIDER_CONFIGS.openrouter.defaultModel,
           messages,
           max_tokens: config.maxTokens || 1024,
           temperature: config.temperature || 0.7,

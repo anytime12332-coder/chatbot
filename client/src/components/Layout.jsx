@@ -4,12 +4,11 @@ import { useAuth } from '../context/AuthContext';
 import { useBots } from '../context/BotContext';
 import {
   LayoutDashboard, Bot, Key, Code, MessageSquare, Settings,
-  LogOut, Menu, X, ChevronDown, Plus, List, BarChart3, Users, Database, Mic,
+  LogOut, Menu, X, ChevronDown, Plus, List, BarChart3,
 } from 'lucide-react';
 
 export default function Layout({ children }) {
-  const admin = useAuth().admin;
-  const logout = useAuth().logout;
+  const { admin, logout } = useAuth();
   const { bots, activeBot, selectBot } = useBots();
   const navigate = useNavigate();
   const { botId } = useParams();
@@ -39,9 +38,6 @@ export default function Layout({ children }) {
   const botNav = currentBot ? [
     { to: `/bot/${currentBot.id}/dashboard`, icon: LayoutDashboard, label: 'Dashboard' },
     { to: `/bot/${currentBot.id}/config`, icon: Bot, label: 'Bot Config' },
-    { to: `/bot/${currentBot.id}/voice`, icon: Mic, label: 'Voice Input' },
-    { to: `/bot/${currentBot.id}/rag`, icon: Database, label: 'RAG Knowledge' },
-    { to: `/bot/${currentBot.id}/leads`, icon: Users, label: 'Leads' },
     { to: `/bot/${currentBot.id}/api`, icon: Key, label: 'API Settings' },
     { to: `/bot/${currentBot.id}/embed`, icon: Code, label: 'Embed & API' },
     { to: `/bot/${currentBot.id}/conversations`, icon: MessageSquare, label: 'Conversations' },

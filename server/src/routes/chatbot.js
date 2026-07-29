@@ -47,8 +47,7 @@ router.post('/', async (req, res) => {
   try {
     const {
       name, businessName, businessInfo, systemPrompt, welcomeMessage, primaryColor, position,
-      leadCollectionEnabled, leadTriggerPrompt, leadQuestions, webhookUrl, leadStorageOption,
-      leadTriggerMode, leadTurnThreshold, leadPhoneFormat, widgetTheme, leadScoringRules
+      statusText, avatarIcon, avatarUrl, placeholderText, launcherText, theme, fontSize, borderRadius, starterPrompts, hideBranding,
     } = req.body;
 
     const chatbot = await prisma.chatbot.create({
@@ -60,17 +59,17 @@ router.post('/', async (req, res) => {
         welcomeMessage: welcomeMessage || 'Hello! How can I help you today?',
         primaryColor: primaryColor || '#6366f1',
         position: position || 'bottom-right',
+        statusText: statusText || 'Online',
+        avatarIcon: avatarIcon || 'bot',
+        avatarUrl: avatarUrl || '',
+        placeholderText: placeholderText || 'Type a message...',
+        launcherText: launcherText || '',
+        theme: theme || 'light',
+        fontSize: fontSize || 'medium',
+        borderRadius: borderRadius || '18px',
+        starterPrompts: starterPrompts || '',
+        hideBranding: hideBranding ?? false,
         adminId: req.admin.id,
-        leadCollectionEnabled: leadCollectionEnabled ?? false,
-        leadTriggerPrompt: leadTriggerPrompt || 'When a user asks to buy a service, get a quote, hire us, contact support, or become a lead.',
-        leadQuestions: leadQuestions || '[]',
-        webhookUrl: webhookUrl || '',
-        leadStorageOption: leadStorageOption || 'both',
-        leadTriggerMode: leadTriggerMode || 'intent_only',
-        leadTurnThreshold: leadTurnThreshold !== undefined ? parseInt(leadTurnThreshold) : 3,
-        leadPhoneFormat: leadPhoneFormat || 'IN',
-        widgetTheme: widgetTheme || '{}',
-        leadScoringRules: leadScoringRules || '{}',
         apiConfig: {
           create: {
             provider: 'openai',
@@ -126,9 +125,7 @@ router.put('/:id', async (req, res) => {
 
     const {
       name, businessName, businessInfo, systemPrompt, welcomeMessage, primaryColor, position, isActive,
-      leadCollectionEnabled, leadTriggerPrompt, leadQuestions, webhookUrl, leadStorageOption,
-      leadTriggerMode, leadTurnThreshold, leadPhoneFormat, widgetTheme, leadScoringRules,
-      ragEnabled, ragProvider, ragApiKey, ragModel
+      statusText, avatarIcon, avatarUrl, placeholderText, launcherText, theme, fontSize, borderRadius, starterPrompts, hideBranding,
     } = req.body;
 
     const chatbot = await prisma.chatbot.update({
@@ -142,58 +139,19 @@ router.put('/:id', async (req, res) => {
         ...(primaryColor !== undefined && { primaryColor }),
         ...(position !== undefined && { position }),
         ...(isActive !== undefined && { isActive }),
-        ...(leadCollectionEnabled !== undefined && { leadCollectionEnabled }),
-        ...(leadTriggerPrompt !== undefined && { leadTriggerPrompt }),
-        ...(leadQuestions !== undefined && { leadQuestions }),
-        ...(webhookUrl !== undefined && { webhookUrl }),
-        ...(leadStorageOption !== undefined && { leadStorageOption }),
-        ...(leadTriggerMode !== undefined && { leadTriggerMode }),
-        ...(leadTurnThreshold !== undefined && { leadTurnThreshold: parseInt(leadTurnThreshold) }),
-        ...(leadPhoneFormat !== undefined && { leadPhoneFormat }),
-        ...(widgetTheme !== undefined && { widgetTheme }),
-        ...(leadScoringRules !== undefined && { leadScoringRules }),
-        ...(req.body.voiceConfig !== undefined && { voiceConfig: req.body.voiceConfig }),
-        ...(ragEnabled !== undefined && { ragEnabled }),
-        ...(ragProvider !== undefined && { ragProvider }),
-        ...(ragApiKey !== undefined && { ragApiKey: ragApiKey.includes('****') ? existing.ragApiKey : encrypt(ragApiKey) }),
-        ...(ragModel !== undefined && { ragModel }),
+        ...(statusText !== undefined && { statusText }),
+        ...(avatarIcon !== undefined && { avatarIcon }),
+        ...(avatarUrl !== undefined && { avatarUrl }),
+        ...(placeholderText !== undefined && { placeholderText }),
+        ...(launcherText !== undefined && { launcherText }),
+        ...(theme !== undefined && { theme }),
+        ...(fontSize !== undefined && { fontSize }),
+        ...(borderRadius !== undefined && { borderRadius }),
+        ...(starterPrompts !== undefined && { starterPrompts }),
+        ...(hideBranding !== undefined && { hideBranding }),
       },
       include: { apiConfig: true },
     });
-
-    // Auto rebuild RAG chunks if businessInfo changed and RAG is enabled
-    if (businessInfo !== undefined && businessInfo !== existing.businessInfo && chatbot.ragEnabled) {
-      const { splitTextIntoChunks, generateEmbedding } = require('../lib/rag');
-      const decryptedKey = chatbot.ragApiKey ? decrypt(chatbot.ragApiKey) : null;
-      const chunks = splitTextIntoChunks(businessInfo);
-      
-      if (chunks.length > 0) {
-        await prisma.documentChunk.deleteMany({ where: { chatbotId: chatbot.id } });
-        for (const chunkObj of chunks) {
-          let embeddingStr = '[]';
-          if (decryptedKey) {
-            try {
-              const textToEmbed = chunkObj.sectionHeading ? `[Section: ${chunkObj.sectionHeading}]\n${chunkObj.content}` : chunkObj.content;
-              const embeddingVector = await generateEmbedding(textToEmbed, chatbot.ragProvider, decryptedKey, chatbot.ragModel);
-              embeddingStr = JSON.stringify(embeddingVector);
-            } catch (e) {
-              console.warn(`Auto-embedding generation failed in chatbot update: ${e.message}`);
-            }
-          }
-          await prisma.documentChunk.create({
-            data: {
-              chatbotId: chatbot.id,
-              content: chunkObj.content,
-              embedding: embeddingStr,
-              chunkIndex: chunkObj.chunkIndex,
-              sectionHeading: chunkObj.sectionHeading,
-              charStart: chunkObj.charStart,
-              charEnd: chunkObj.charEnd
-            }
-          });
-        }
-      }
-    }
 
     if (chatbot.apiConfig?.apiKey) {
       chatbot.apiConfig.apiKey = maskApiKey(decrypt(chatbot.apiConfig.apiKey));

@@ -96,7 +96,7 @@ export default function ApiConfig() {
       )}
 
       <form onSubmit={handleSave} className="space-y-6">
-{/* Provider Selection */}
+        {/* Provider Selection */}
         <div className="card">
           <div className="flex items-center gap-2 mb-4">
             <Cpu className="w-5 h-5 text-primary-600" />
@@ -107,22 +107,8 @@ export default function ApiConfig() {
               <button key={provider.id} type="button"
                 onClick={() => { updateField('provider', provider.id); updateField('model', provider.defaultModel); if (provider.id !== 'custom') updateField('baseUrl', ''); }}
                 className={`p-4 rounded-xl border-2 text-center transition-all ${config.provider === provider.id ? 'border-primary-500 bg-primary-50 shadow-sm' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}>
-                <div className="flex items-center justify-center h-8 mb-1">
-                  {provider.id === 'openai' && (
-                    <img src="https://cdn.simpleicons.org/openai/black" alt="OpenAI" className="w-6 h-6 object-contain" />
-                  )}
-                  {provider.id === 'gemini' && (
-                    <img src="https://cdn.simpleicons.org/googlegemini" alt="Gemini" className="w-6 h-6 object-contain" />
-                  )}
-                  {provider.id === 'claude' && (
-                    <img src="https://cdn.simpleicons.org/anthropic" alt="Claude" className="w-6 h-6 object-contain" />
-                  )}
-                  {provider.id === 'openrouter' && (
-                    <img src="https://openrouter.ai/favicon.ico" alt="OpenRouter" className="w-6 h-6 object-contain rounded" />
-                  )}
-                  {provider.id === 'custom' && (
-                    <span className="text-2xl">⚙️</span>
-                  )}
+                <div className="text-2xl mb-1">
+                  {provider.id === 'openai' && '\ud83d\udfe2'}{provider.id === 'gemini' && '\ud83d\udd35'}{provider.id === 'claude' && '\ud83d\udfe0'}{provider.id === 'openrouter' && '\ud83d\udfe3'}{provider.id === 'custom' && '\u2699\ufe0f'}
                 </div>
                 <p className="text-sm font-medium text-gray-900">{provider.name}</p>
                 {provider.supportsStreaming && <p className="text-xs text-green-600 mt-1">Streaming \u2713</p>}

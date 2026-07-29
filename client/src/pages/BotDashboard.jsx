@@ -53,11 +53,10 @@ export default function BotDashboard() {
   }
 
   const statCards = [
-    { label: 'Conversations', value: stats?.totalConversations || 0, icon: Users, bg: 'bg-blue-50', text: 'text-blue-700', change: stats?.weekConversations || 0, changeLabel: 'this week', to: `/bot/${botId}/conversations` },
-    { label: 'Leads Collected', value: stats?.totalLeads || 0, icon: Users, bg: 'bg-indigo-50', text: 'text-indigo-700', change: stats?.todayLeads || 0, changeLabel: 'today', to: `/bot/${botId}/leads` },
-    { label: 'Messages', value: stats?.totalMessages || 0, icon: MessageSquare, bg: 'bg-green-50', text: 'text-green-700', change: stats?.todayMessages || 0, changeLabel: 'today', to: null },
-    { label: 'Avg Response', value: `${stats?.avgResponseTime || 0}ms`, icon: Clock, bg: 'bg-amber-50', text: 'text-amber-700', change: null, to: null },
-    { label: 'Tokens Used', value: (stats?.totalTokens || 0).toLocaleString(), icon: Zap, bg: 'bg-purple-50', text: 'text-purple-700', change: stats?.activeConversations || 0, changeLabel: 'active now', to: null },
+    { label: 'Conversations', value: stats?.totalConversations || 0, icon: Users, bg: 'bg-blue-50', text: 'text-blue-700', change: stats?.weekConversations || 0, changeLabel: 'this week' },
+    { label: 'Messages', value: stats?.totalMessages || 0, icon: MessageSquare, bg: 'bg-green-50', text: 'text-green-700', change: stats?.todayMessages || 0, changeLabel: 'today' },
+    { label: 'Avg Response', value: `${stats?.avgResponseTime || 0}ms`, icon: Clock, bg: 'bg-amber-50', text: 'text-amber-700', change: null },
+    { label: 'Tokens Used', value: (stats?.totalTokens || 0).toLocaleString(), icon: Zap, bg: 'bg-purple-50', text: 'text-purple-700', change: stats?.activeConversations || 0, changeLabel: 'active now' },
   ];
 
   return (
@@ -68,36 +67,27 @@ export default function BotDashboard() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        {statCards.map((card) => {
-          const CardComponent = card.to ? 'button' : 'div';
-          const clickProps = card.to ? { onClick: () => navigate(card.to) } : {};
-          
-          return (
-            <CardComponent
-              key={card.label}
-              {...clickProps}
-              className={`stat-card text-left transition-all ${card.to ? 'hover:shadow-md hover:border-gray-300 active:scale-95 cursor-pointer' : ''}`}
-            >
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-gray-500 font-medium">{card.label}</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-1">{card.value}</p>
-                </div>
-                <div className={`${card.bg} p-2.5 rounded-lg`}>
-                  <card.icon className={`w-5 h-5 ${card.text}`} />
-                </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {statCards.map((card) => (
+          <div key={card.label} className="stat-card">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm text-gray-500 font-medium">{card.label}</p>
+                <p className="text-2xl font-bold text-gray-900 mt-1">{card.value}</p>
               </div>
-              {card.change !== null && card.change !== undefined && (
-                <div className="mt-3 flex items-center gap-1 text-sm">
-                  <ArrowUpRight className="w-4 h-4 text-green-500" />
-                  <span className="text-green-600 font-medium">{card.change}</span>
-                  <span className="text-gray-400">{card.changeLabel}</span>
-                </div>
-              )}
-            </CardComponent>
-          );
-        })}
+              <div className={`${card.bg} p-2.5 rounded-lg`}>
+                <card.icon className={`w-5 h-5 ${card.text}`} />
+              </div>
+            </div>
+            {card.change !== null && card.change !== undefined && (
+              <div className="mt-3 flex items-center gap-1 text-sm">
+                <ArrowUpRight className="w-4 h-4 text-green-500" />
+                <span className="text-green-600 font-medium">{card.change}</span>
+                <span className="text-gray-400">{card.changeLabel}</span>
+              </div>
+            )}
+          </div>
+        ))}
       </div>
 
       {/* Charts */}

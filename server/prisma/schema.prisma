@@ -1,6 +1,5 @@
 generator client {
-  provider      = "prisma-client-js"
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -28,6 +27,16 @@ model Chatbot {
   primaryColor   String   @default("#6366f1")
   position       String   @default("bottom-right")
   isActive       Boolean  @default(true)
+  statusText     String   @default("Online")
+  avatarIcon     String   @default("bot")
+  avatarUrl      String   @default("")
+  placeholderText String  @default("Type a message...")
+  launcherText   String   @default("")
+  theme          String   @default("light")
+  fontSize       String   @default("medium")
+  borderRadius   String   @default("18px")
+  starterPrompts String   @default("") @db.Text
+  hideBranding   Boolean  @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -35,27 +44,6 @@ model Chatbot {
   admin         Admin          @relation(fields: [adminId], references: [id], onDelete: Cascade)
   apiConfig     ApiConfig?
   conversations Conversation[]
-
-  // Lead collection configurations
-  leadCollectionEnabled Boolean @default(false)
-  leadTriggerPrompt     String  @default("When a user asks to buy a service, get a quote, hire us, contact support, or become a lead.") @db.Text
-  leadQuestions         String  @default("[]") @db.Text // JSON list of questions
-  webhookUrl            String  @default("") @db.Text
-  leadStorageOption     String  @default("both") // "inbox", "separate", or "both"
-  leadTriggerMode       String  @default("intent_only") // "intent_only", "turn_threshold", "manual_only"
-  leadTurnThreshold     Int     @default(3)
-  leadPhoneFormat       String  @default("IN") // "IN", "US", "ALL"
-  widgetTheme           String  @default("{}") @db.Text // JSON configuration for widget appearance
-  leadScoringRules      String  @default("{}") @db.Text // JSON configuration for lead scoring rules
-  voiceConfig           String  @default("{}") @db.Text // JSON configuration for voice input settings
-  leads                 Lead[]
-
-  // RAG configurations
-  ragEnabled  Boolean @default(false)
-  ragProvider String  @default("openai") // "openai", "gemini", "custom"
-  ragApiKey   String  @default("") @db.Text
-  ragModel    String  @default("text-embedding-3-small")
-  ragChunks   DocumentChunk[]
 
   @@index([adminId])
 }
@@ -89,14 +77,6 @@ model Conversation {
   chatbot   Chatbot   @relation(fields: [chatbotId], references: [id], onDelete: Cascade)
   messages  Message[]
 
-  // Lead collection states
-  leadStatus           String @default("inactive") // "inactive", "collecting", "completed"
-  currentQuestionIndex Int    @default(0)
-  collectedData        String @default("{}") @db.Text // JSON string for collected fields
-  leadScore            String?
-  scoreReasoning       String? @db.Text
-  lead                 Lead?
-
   @@index([sessionId])
   @@index([chatbotId])
   @@index([createdAt])
@@ -117,39 +97,3 @@ model Message {
   @@index([createdAt])
   @@index([role])
 }
-
-model Lead {
-  id             String        @id @default(uuid())
-  chatbotId      String
-  conversationId String?       @unique
-  details        String        @db.Text // JSON string of lead fields
-  status         String        @default("completed") // "completed", "incomplete"
-  isComplete     Boolean       @default(true)
-  leadScore      String?       // "hot", "warm", "cold"
-  scoreReasoning String?       @db.Text
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-
-  chatbot        Chatbot       @relation(fields: [chatbotId], references: [id], onDelete: Cascade)
-  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
-
-  @@index([chatbotId])
-}
-
-model DocumentChunk {
-  id            String   @id @default(uuid())
-  chatbotId     String
-  content       String   @db.Text
-  embedding     String   @db.Text // JSON stringified float array
-  chunkIndex    Int      @default(0)
-  sourceSection String?
-  sectionHeading String?
-  charStart     Int?
-  charEnd       Int?
-  createdAt     DateTime @default(now())
-
-  chatbot    Chatbot  @relation(fields: [chatbotId], references: [id], onDelete: Cascade)
-
-  @@index([chatbotId])
-}
-

@@ -86,7 +86,7 @@ router.get('/stats/:chatbotId', async (req, res) => {
     const thisWeek = new Date(today);
     thisWeek.setDate(thisWeek.getDate() - 7);
 
-    const [totalConversations, totalMessages, todayConversations, todayMessages, weekConversations, activeConversations, avgResponseTime, totalTokens, totalLeads, todayLeads] = await Promise.all([
+    const [totalConversations, totalMessages, todayConversations, todayMessages, weekConversations, activeConversations, avgResponseTime, totalTokens] = await Promise.all([
       prisma.conversation.count({ where: { chatbotId } }),
       prisma.message.count({ where: { conversation: { chatbotId } } }),
       prisma.conversation.count({ where: { chatbotId, createdAt: { gte: today } } }),
@@ -101,8 +101,6 @@ router.get('/stats/:chatbotId', async (req, res) => {
         where: { role: 'assistant', conversation: { chatbotId } },
         _sum: { tokenCount: true },
       }),
-      prisma.lead.count({ where: { chatbotId } }),
-      prisma.lead.count({ where: { chatbotId, createdAt: { gte: today } } }),
     ]);
 
     res.json({
@@ -114,8 +112,6 @@ router.get('/stats/:chatbotId', async (req, res) => {
       activeConversations,
       avgResponseTime: Math.round(avgResponseTime._avg.responseTimeMs || 0),
       totalTokens: totalTokens._sum.tokenCount || 0,
-      totalLeads,
-      todayLeads,
     });
   } catch (error) {
     console.error('Bot stats error:', error);
